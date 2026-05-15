@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+/** import { Stack } from 'expo-router';
 
 export default function Layout() {
     return (
@@ -7,4 +7,9 @@ export default function Layout() {
             <Stack.Screen name="capture/camera" options={{ headerShown: false }} />
         </Stack>
     );
+} */
+import { Stack } from 'expo-router';
+
+export default function Layout() {
+  return <Stack />;
 }
