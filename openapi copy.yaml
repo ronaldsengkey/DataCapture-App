@@ -1,0 +1,152 @@
+openapi: 3.0.3
+info:
+  title: DataCapture Offline Processing Engine
+  description: Internal module interface specifications for the local, offline DataCapture Engine. Includes AI inferences, local persistence schemas, and document exports.
+  version: 1.0.0
+servers:
+  - url: localhost:0
+    description: Internal Loopback / IPC Router
+paths:
+  /ai/detect:
+    post:
+      summary: Auto-detect items in an image/frame
+      operationId: detectItems
+      requestBody:
+        description: Raw Image Frame (Camera/File)
+        required: true
+        content:
+          image/jpeg:
+            schema:
+              type: string
+              format: binary
+          image/png:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Detected items array (Text, Table, Image slices)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectedItemArray'
+
+  /data/capture:
+    post:
+      summary: Save selected captured data items
+      operationId: saveCapturedItems
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptureRequest'
+      responses:
+        '201':
+          description: Successfully persisted.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /data/fetch-url:
+    post:
+      summary: Parse HTML content from a URL locally
+      operationId: parseUrl
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  format: uri
+      responses:
+        '200':
+          description: Parsed nodes found at URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DetectedItemArray'
+
+  /reports/export:
+    post:
+      summary: Generate an exported report artifact
+      operationId: exportReport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+                  enum: [pdf, pptx, image, excel]
+                itemIds:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: Report generation complete and saved securely over filesystem
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+components:
+  schemas:
+    DetectedItemArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/DetectedItem'
+        
+    DetectedItem:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [text, table, image]
+        confidenceScore:
+          type: number
+          format: float
+        textContent:
+          type: string
+        tableData:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+        imageBlob:
+          type: string
+          format: byte
+        boundingBox:
+          type: array
+          items:
+            type: integer
+            
+    CaptureRequest:
+      type: object
+      properties:
+        itemsToSave:
+          type: array
+          items:
+            $ref: '#/components/schemas/DetectedItem'
+            
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
+        message:
+          type: string
