@@ -9,9 +9,6 @@
       "distribution": "internal"
     },
     "preview": {
-<<<<<<< HEAD
-      "distribution": "internal"
-=======
       "distribution": "internal",
       "android": {
         "buildType": "apk"
@@ -19,7 +16,6 @@
       "ios": {
         "simulator": true
       }
->>>>>>> b435071 (Fix: animated splash, camera permission crash, auto-detection with unique IDs, removed unwanted camera UI)
     },
     "production": {
       "autoIncrement": true
