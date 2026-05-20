@@ -45,9 +45,12 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      # Simulate a local build to catch cross-platform errors
-      - name: Perform EAS Local Android Build Simulation
-        run: eas build --platform android --local --non-interactive || echo "Simulated Pass"
+      # Simulate a build to catch cross-platform errors.
+      # IMPORTANT: Avoid `--local` because it requires local native toolchains (JDK/Android SDK, Xcode, etc.).
+      # Using remote managed build lets CI validate JS bundling + native config without local Java.
+      - name: Perform EAS Remote Android Build (validation)
+        run: eas build --platform android --non-interactive --profile preview
 
-      - name: Perform EAS Local iOS Build Simulation
-        run: eas build --platform ios --local --non-interactive || echo "Simulated Pass"
+      - name: Perform EAS Remote iOS Build (validation)
+        run: eas build --platform ios --non-interactive --profile preview
+

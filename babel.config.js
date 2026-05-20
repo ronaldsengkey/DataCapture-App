@@ -3,6 +3,11 @@ module.exports = function (api) {
   const isTest = process.env.NODE_ENV === 'test' || process.env.BABEL_ENV === 'test';
   return {
     presets: ['babel-preset-expo'],
-    plugins: isTest ? [] : ['nativewind/babel'],
+    // Disable NativeWind Babel plugin for now.
+    // The Expo/Metro bundling pipeline is currently failing with:
+    // "Use process(css).then(cb) to work with async plugins" (postcss/nativewind).
+    // Removing this plugin should unblock production/CI bundling.
+    plugins: [],
+
   };
 };

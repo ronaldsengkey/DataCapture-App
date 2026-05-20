@@ -14,7 +14,16 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+// NOTE:
+// NativeWind's Babel/PostCSS pipeline (used during Expo/Metro bundling)
+// can choke on certain async PostCSS plugin behavior. If bundling fails with
+// errors related to PostCSS async plugins, temporarily disabling NativeWind
+// for this screen (via `nativewind/babel` configuration) or avoiding CSS-in-JS
+// patterns can unblock the build.
+//
+// This comment is informational; it does not change runtime behavior.
 export default function UrlCapture() {
+
     const router = useRouter();
     const [url, setUrl] = useState('');
     const [isLoading, setIsLoading] = useState(false);
