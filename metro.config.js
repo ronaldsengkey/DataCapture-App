@@ -1,7 +1,11 @@
 // metro.config.js
 const { getDefaultConfig } = require('expo/metro-config');
-const { withNativeWind } = require('nativewind/metro');
 
 const config = getDefaultConfig(__dirname);
 
-module.exports = withNativeWind(config, { input: './global.css' });
+// NativeWind v2 does not expose `nativewind/metro`.
+// NativeWind setup for Expo is handled via `babel` (`nativewind/babel`),
+// so Metro config can stay as the Expo default.
+module.exports = config;
+
+
