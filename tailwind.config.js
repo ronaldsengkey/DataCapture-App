@@ -3,8 +3,12 @@ module.exports = {
     content: [
         "./App.{js,jsx,ts,tsx}",
         "./app/**/*.{js,jsx,ts,tsx}",
+<<<<<<< HEAD
         "./src/**/*.{js,jsx,ts,tsx}",
         "./components/**/*.{js,jsx,ts,tsx}"
+=======
+        "./src/**/*.{js,jsx,ts,tsx}"
+>>>>>>> b435071 (Fix: animated splash, camera permission crash, auto-detection with unique IDs, removed unwanted camera UI)
     ],
     theme: {
         extend: {

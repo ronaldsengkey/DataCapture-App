@@ -16,7 +16,11 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.datacapture.app"
+      "bundleIdentifier": "com.datacapture.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "DataCapture needs camera access to scan and analyze documents, receipts, and other data sources.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -31,7 +35,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-camera"
+      "expo-camera",
+      "expo-document-picker"
     ],
     "experiments": {
       "typedRoutes": true
