@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
     View, 
     Text, 
@@ -9,54 +9,17 @@ import {
     Alert, 
     ActivityIndicator,
     Modal,
-    Platform
+    Platform,
+    Dimensions
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useNavigation } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { DatabaseService, DataCaptureItem } from '../../src/services/DatabaseService';
-import { ExportService } from '../../src/services/ExportService';
+import { ExportService, ReportWidget } from '../../src/services/ExportService';
 
-// Pre-defined mock data simulating automatic classification after photo capture
-const MOCK_DETECTED_ITEMS: DataCaptureItem[] = [
-    {
-        id: 'SRC-409A',
-        type: 'text',
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        content: JSON.stringify({
-            title: 'Executive Summary',
-            text: 'Regional revenue growth peaked in Q3 due to heightened demand for digital capture integrations, resulting in a +18.4% variance over the baseline projections.'
-        })
-    },
-    {
-        id: 'SRC-732B',
-        type: 'table',
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        content: JSON.stringify({
-            title: 'Q3 Financial Performance',
-            headers: ['Month', 'Target ($k)', 'Actual ($k)', 'Variance'],
-            rows: [
-                ['July', '120', '135', '+12.5%'],
-                ['August', '140', '168', '+20.0%'],
-                ['September', '150', '184', '+22.6%']
-            ]
-        })
-    },
-    {
-        id: 'SRC-119C',
-        type: 'image',
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 24 * 60 * 60 * 1000,
-        content: JSON.stringify({
-            title: 'Authorized Seal Stamp',
-            url: 'https://placehold.co/150x150.png',
-            meta: 'OCR signature check validated locally.'
-        })
-    }
-];
+const { width } = Dimensions.get('window');
 
-interface ReportWidget {
+interface SandboxWidget {
     id: string;
     sourceId: string;
     type: 'text' | 'table' | 'chart';
@@ -66,15 +29,48 @@ interface ReportWidget {
 
 export default function ReviewScreen() {
     const router = useRouter();
+    const navigation = useNavigation();
     const dbService = DatabaseService.getInstance();
     const exportService = new ExportService();
 
     // State
-    const [detectedSources, setDetectedSources] = useState<DataCaptureItem[]>(MOCK_DETECTED_ITEMS);
-    const [reportWidgets, setReportWidgets] = useState<ReportWidget[]>([]);
+    const [detectedSources, setDetectedSources] = useState<DataCaptureItem[]>([]);
+    const [reportWidgets, setReportWidgets] = useState<SandboxWidget[]>([]);
     const [activeTab, setActiveTab] = useState<'sources' | 'report'>('sources');
     const [isExporting, setIsExporting] = useState(false);
     const [exportedFile, setExportedFile] = useState<string | null>(null);
+    const [isLoadingData, setIsLoadingData] = useState(true);
+
+    // Multi-select state
+    const [selectedSourceIds, setSelectedSourceIds] = useState<Set<string>>(new Set());
+
+    // Drag simulation visual state
+    const [activeDragId, setActiveDragId] = useState<string | null>(null);
+
+    // Draft review modal state
+    const [draftFormat, setDraftFormat] = useState<'pdf' | 'excel' | 'pptx' | null>(null);
+
+    // Fetch captured data on focus
+    const loadActiveItems = async () => {
+        setIsLoadingData(true);
+        try {
+            const items = await dbService.fetchActiveItems();
+            setDetectedSources(items);
+        } catch (error) {
+            console.error('[REVIEW SCREEN] fetchActiveItems failed:', error);
+            Alert.alert('Database Error', 'Could not load captured items.');
+        } finally {
+            setIsLoadingData(false);
+        }
+    };
+
+    useEffect(() => {
+        loadActiveItems();
+        const unsubscribe = navigation.addListener('focus', () => {
+            loadActiveItems();
+        });
+        return unsubscribe;
+    }, [navigation]);
 
     // Helpers
     const parseContent = (contentString: string) => {
@@ -85,19 +81,69 @@ export default function ReviewScreen() {
         }
     };
 
+    // Card/Source selection
+    const toggleSourceSelection = (id: string) => {
+        setSelectedSourceIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const handleBulkAdd = (widgetType: 'text' | 'table' | 'chart') => {
+        if (selectedSourceIds.size === 0) return;
+
+        const newWidgets: SandboxWidget[] = [];
+        let duplicatesCount = 0;
+
+        detectedSources.forEach((source) => {
+            if (selectedSourceIds.has(source.id)) {
+                // Ensure only tables/charts map to table/chart type
+                if (widgetType === 'chart' && source.type !== 'table') {
+                    return; // Skip mapping charts from non-tables
+                }
+
+                const parsed = parseContent(source.content);
+                const exists = reportWidgets.some(w => w.sourceId === source.id && w.type === widgetType);
+                if (exists) {
+                    duplicatesCount++;
+                    return;
+                }
+
+                newWidgets.push({
+                    id: `WIDGET-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+                    sourceId: source.id,
+                    type: widgetType,
+                    title: parsed.title || `Data Object (${source.id})`,
+                    data: parsed
+                });
+            }
+        });
+
+        if (newWidgets.length > 0) {
+            setReportWidgets([...reportWidgets, ...newWidgets]);
+        }
+
+        setSelectedSourceIds(new Set());
+        Alert.alert(
+            'Batch Action Success',
+            `Successfully added ${newWidgets.length} widgets to report.${duplicatesCount > 0 ? ` (Skipped ${duplicatesCount} duplicates)` : ''}`
+        );
+    };
+
     // Actions
     const addWidget = (source: DataCaptureItem, widgetType: 'text' | 'table' | 'chart') => {
         const parsed = parseContent(source.content);
         
-        // Prevent duplicate mapping of same source into same widget type to keep layout tidy
         const exists = reportWidgets.some(w => w.sourceId === source.id && w.type === widgetType);
         if (exists) {
             Alert.alert('Duplicate Widget', 'This data source is already mapped to a ' + widgetType + ' widget.');
             return;
         }
 
-        const newWidget: ReportWidget = {
-            id: `WIDGET-${Math.random().toString(36).substr(2, 9).toUpperCase()}`,
+        const newWidget: SandboxWidget = {
+            id: `WIDGET-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
             sourceId: source.id,
             type: widgetType,
             title: parsed.title || `Data Object (${source.id})`,
@@ -130,34 +176,51 @@ export default function ReviewScreen() {
         setReportWidgets(updated);
     };
 
-    const handleExport = async (format: 'pdf' | 'excel' | 'pptx') => {
+    // Trigger Draft Review Modal first
+    const handleTriggerExport = (format: 'pdf' | 'excel' | 'pptx') => {
         if (reportWidgets.length === 0) {
             Alert.alert('Empty Report', 'Please map at least one detected source to a widget first.');
             return;
         }
+        setDraftFormat(format);
+    };
 
+    // Confirm Draft & Generate File
+    const handleConfirmExport = async () => {
+        const format = draftFormat;
+        if (!format) return;
+
+        setDraftFormat(null);
         setIsExporting(true);
         const reportId = `REP-${Date.now().toString().slice(-6)}`;
-        const sourceIds = reportWidgets.map(w => w.sourceId);
 
         try {
-            // Save to SQLite
-            for (const item of detectedSources) {
-                await dbService.saveCapturedItem(item);
-            }
+            // Map sandbox widgets to service widgets
+            const serviceWidgets: ReportWidget[] = reportWidgets.map(w => ({
+                type: w.type,
+                title: w.title,
+                data: w.data
+            }));
 
-            // Export to document
             let fileUri = '';
             if (format === 'pdf') {
-                fileUri = await exportService.generatePDF(reportId, sourceIds);
+                fileUri = await exportService.generatePDF(reportId, serviceWidgets);
             } else if (format === 'excel') {
-                fileUri = await exportService.generateExcel(reportId, sourceIds);
+                fileUri = await exportService.generateExcel(reportId, serviceWidgets);
             } else {
-                fileUri = await exportService.generatePPTX(reportId, sourceIds);
+                fileUri = await exportService.generatePPTX(reportId, serviceWidgets);
+            }
+
+            // Share native file sheet (Issues 9, 10, 13)
+            try {
+                await exportService.shareFile(fileUri);
+            } catch (shareErr) {
+                console.log('Sharing failed or cancelled:', shareErr);
             }
 
             setExportedFile(fileUri);
         } catch (e) {
+            console.error('[EXPORT ERROR]:', e);
             Alert.alert('Export Error', 'An error occurred while generating your report.');
         } finally {
             setIsExporting(false);
@@ -198,261 +261,517 @@ export default function ReviewScreen() {
             </View>
 
             {/* Main Content Area */}
-            <ScrollView contentContainerStyle={styles.scrollContainer}>
-                {activeTab === 'sources' ? (
-                    // Section 1: Raw Detected Data Sources
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Automatically Separated Sources</Text>
-                        <Text style={styles.sectionDesc}>
-                            The camera has split your capture into distinct, addressable data inputs:
-                        </Text>
+            {isLoadingData ? (
+                <View style={styles.centeredContainer}>
+                    <ActivityIndicator size="large" color="#004ac6" />
+                    <Text style={styles.loadingDataText}>Fetching captured inputs...</Text>
+                </View>
+            ) : detectedSources.length === 0 ? (
+                <View style={styles.centeredContainer}>
+                    <Text style={styles.emptyIcon}>📦</Text>
+                    <Text style={styles.emptyTitle}>No captured data found</Text>
+                    <Text style={styles.emptyDesc}>Go back and capture some data first via camera, file, or URL.</Text>
+                    <TouchableOpacity style={styles.emptyGoBackBtn} onPress={() => router.back()}>
+                        <Text style={styles.emptyGoBackBtnText}>GO BACK TO CAPTURE</Text>
+                    </TouchableOpacity>
+                </View>
+            ) : (
+                <ScrollView contentContainerStyle={[styles.scrollContainer, selectedSourceIds.size > 0 && { paddingBottom: 100 }]}>
+                    {activeTab === 'sources' ? (
+                        // Section 1: Raw Detected Data Sources
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Separated Data Inputs</Text>
+                            <Text style={styles.sectionDesc}>
+                                Select one or more cards to batch import, or add them individually:
+                            </Text>
 
-                        {detectedSources.map((source) => {
-                            const parsed = parseContent(source.content);
-                            return (
-                                <View key={source.id} style={styles.sourceCard}>
-                                    {/* Card Header metadata */}
-                                    <View style={styles.sourceHeader}>
-                                        <View style={styles.sourceIdContainer}>
-                                            <Text style={styles.sourceIdText}>{source.id}</Text>
-                                        </View>
-                                        <View style={[
-                                            styles.typeBadge, 
-                                            source.type === 'text' && styles.textBadge,
-                                            source.type === 'table' && styles.tableBadge,
-                                            source.type === 'image' && styles.imageBadge
-                                        ]}>
-                                            <Text style={styles.typeBadgeText}>
-                                                {source.type.toUpperCase()}
-                                            </Text>
-                                        </View>
-                                    </View>
-
-                                    {/* Card Content Previews */}
-                                    <View style={styles.sourceBody}>
-                                        <Text style={styles.sourceTitleText}>{parsed.title}</Text>
-                                        
-                                        {source.type === 'text' && (
-                                            <Text style={styles.bodyTextPreview}>{parsed.text}</Text>
-                                        )}
-
-                                        {source.type === 'table' && (
-                                            <View style={styles.tablePreviewContainer}>
-                                                <Text style={styles.bodyTextPreviewBold}>
-                                                    Table: {parsed.rows?.length || 0} rows x {parsed.headers?.length || 0} cols
-                                                </Text>
-                                                <View style={styles.miniTable}>
-                                                    <View style={styles.miniTableHeaderRow}>
-                                                        {parsed.headers?.slice(0, 3).map((h: string, idx: number) => (
-                                                            <Text key={idx} style={styles.miniTableHeaderCell}>{h}</Text>
-                                                        ))}
-                                                    </View>
-                                                    {parsed.rows?.slice(0, 2).map((row: string[], rIdx: number) => (
-                                                        <View key={rIdx} style={styles.miniTableRow}>
-                                                            {row.slice(0, 3).map((cell, cIdx) => (
-                                                                <Text key={cIdx} style={styles.miniTableCell}>{cell}</Text>
-                                                            ))}
-                                                        </View>
-                                                    ))}
+                            {detectedSources.map((source) => {
+                                const parsed = parseContent(source.content);
+                                const isSelected = selectedSourceIds.has(source.id);
+                                return (
+                                    <TouchableOpacity 
+                                        key={source.id} 
+                                        style={[styles.sourceCard, isSelected && styles.sourceCardSelected]}
+                                        onPress={() => toggleSourceSelection(source.id)}
+                                        activeOpacity={0.9}
+                                    >
+                                        {/* Card Header metadata */}
+                                        <View style={styles.sourceHeader}>
+                                            <View style={styles.leftHeaderRow}>
+                                                {/* Checkbox */}
+                                                <View style={[styles.checkbox, isSelected && styles.checkboxActive]}>
+                                                    {isSelected && <Text style={styles.checkboxCheck}>✓</Text>}
+                                                </View>
+                                                <View style={styles.sourceIdContainer}>
+                                                    <Text style={styles.sourceIdText}>{source.id}</Text>
                                                 </View>
                                             </View>
-                                        )}
-
-                                        {source.type === 'image' && (
-                                            <View style={styles.imagePreviewStub}>
-                                                <Text style={styles.imagePreviewStubText}>📷 [Cropped Target Area Stamp]</Text>
-                                                <Text style={styles.imagePreviewStubMeta}>{parsed.meta}</Text>
+                                            <View style={[
+                                                styles.typeBadge, 
+                                                source.type === 'text' && styles.textBadge,
+                                                source.type === 'table' && styles.tableBadge,
+                                                source.type === 'image' && styles.imageBadge
+                                            ]}>
+                                                <Text style={styles.typeBadgeText}>
+                                                    {source.type.toUpperCase()}
+                                                </Text>
                                             </View>
-                                        )}
-                                    </View>
+                                        </View>
 
-                                    {/* Layout Actions */}
-                                    <View style={styles.actionRow}>
-                                        <Text style={styles.actionLabel}>Map to Report Widget:</Text>
-                                        <View style={styles.actionButtons}>
+                                        {/* Card Content Previews */}
+                                        <View style={styles.sourceBody}>
+                                            <Text style={styles.sourceTitleText}>{parsed.title}</Text>
+                                            
                                             {source.type === 'text' && (
-                                                <TouchableOpacity 
-                                                    style={styles.actionBtn}
-                                                    onPress={() => addWidget(source, 'text')}
-                                                >
-                                                    <Text style={styles.actionBtnText}>+ Text Block</Text>
-                                                </TouchableOpacity>
+                                                <Text style={styles.bodyTextPreview}>{parsed.text}</Text>
                                             )}
+
                                             {source.type === 'table' && (
-                                                <>
+                                                <View style={styles.tablePreviewContainer}>
+                                                    <Text style={styles.bodyTextPreviewBold}>
+                                                        Table: {parsed.rows?.length || 0} rows x {parsed.headers?.length || 0} cols
+                                                    </Text>
+                                                    <View style={styles.miniTable}>
+                                                        <View style={styles.miniTableHeaderRow}>
+                                                            {parsed.headers?.slice(0, 3).map((h: string, idx: number) => (
+                                                                <Text key={idx} style={styles.miniTableHeaderCell}>{h}</Text>
+                                                            ))}
+                                                        </View>
+                                                        {parsed.rows?.slice(0, 2).map((row: string[], rIdx: number) => (
+                                                            <View key={rIdx} style={styles.miniTableRow}>
+                                                                {row.slice(0, 3).map((cell, cIdx) => (
+                                                                    <Text key={cIdx} style={styles.miniTableCell}>{cell}</Text>
+                                                                ))}
+                                                            </View>
+                                                        ))}
+                                                    </View>
+                                                </View>
+                                            )}
+
+                                            {source.type === 'image' && (
+                                                <View style={styles.imagePreviewStub}>
+                                                    <Text style={styles.imagePreviewStubText}>📷 [Cropped Target Area Stamp]</Text>
+                                                    <Text style={styles.imagePreviewStubMeta}>{parsed.meta || 'Encrypted Image Resource'}</Text>
+                                                </View>
+                                            )}
+                                        </View>
+
+                                        {/* Layout Actions */}
+                                        <View style={styles.actionRow} onStartShouldSetResponder={() => true} onSubmitEditing={(e) => e.stopPropagation()}>
+                                            <Text style={styles.actionLabel}>Map to Report Widget:</Text>
+                                            <View style={styles.actionButtons}>
+                                                {source.type === 'text' && (
                                                     <TouchableOpacity 
                                                         style={styles.actionBtn}
-                                                        onPress={() => addWidget(source, 'table')}
+                                                        onPress={(e) => {
+                                                            e.stopPropagation();
+                                                            addWidget(source, 'text');
+                                                        }}
                                                     >
-                                                        <Text style={styles.actionBtnText}>+ Table</Text>
+                                                        <Text style={styles.actionBtnText}>+ Text Block</Text>
+                                                    </TouchableOpacity>
+                                                )}
+                                                {source.type === 'table' && (
+                                                    <>
+                                                        <TouchableOpacity 
+                                                            style={styles.actionBtn}
+                                                            onPress={(e) => {
+                                                                e.stopPropagation();
+                                                                addWidget(source, 'table');
+                                                            }}
+                                                        >
+                                                            <Text style={styles.actionBtnText}>+ Table</Text>
+                                                        </TouchableOpacity>
+                                                        <TouchableOpacity 
+                                                            style={[styles.actionBtn, styles.actionBtnChart]}
+                                                            onPress={(e) => {
+                                                                e.stopPropagation();
+                                                                addWidget(source, 'chart');
+                                                            }}
+                                                        >
+                                                            <Text style={styles.actionBtnText}>+ Bar Chart</Text>
+                                                        </TouchableOpacity>
+                                                    </>
+                                                )}
+                                                {source.type === 'image' && (
+                                                    <TouchableOpacity 
+                                                        style={styles.actionBtn}
+                                                        onPress={(e) => {
+                                                            e.stopPropagation();
+                                                            addWidget(source, 'text');
+                                                        }}
+                                                    >
+                                                        <Text style={styles.actionBtnText}>+ Image Block</Text>
+                                                    </TouchableOpacity>
+                                                )}
+                                            </View>
+                                        </View>
+                                    </TouchableOpacity>
+                                );
+                            })}
+                        </View>
+                    ) : (
+                        // Section 2: Sandbox Document Builder
+                        <View style={styles.section}>
+                            <Text style={styles.sectionTitle}>Sandbox Document Layout</Text>
+                            <Text style={styles.sectionDesc}>
+                                Rearrange widgets (long-press triggers visual drag cue) or update titles:
+                            </Text>
+
+                            {reportWidgets.length === 0 ? (
+                                <View style={styles.emptySandbox}>
+                                    <Text style={styles.emptySandboxIcon}>✏️</Text>
+                                    <Text style={styles.emptySandboxTitle}>No widgets added</Text>
+                                    <Text style={styles.emptySandboxDesc}>
+                                        Go to the "Detected Sources" tab to add text blocks, graphs, and spreadsheet tables.
+                                    </Text>
+                                </View>
+                            ) : (
+                                reportWidgets.map((widget, index) => {
+                                    const isBeingDragged = activeDragId === widget.id;
+                                    return (
+                                        <TouchableOpacity 
+                                            key={widget.id} 
+                                            activeOpacity={0.9}
+                                            onLongPress={() => {
+                                                setActiveDragId(widget.id);
+                                            }}
+                                            onPressOut={() => {
+                                                setActiveDragId(null);
+                                            }}
+                                            style={[
+                                                styles.widgetCard, 
+                                                isBeingDragged && styles.widgetCardActiveDrag
+                                            ]}
+                                        >
+                                            {/* Widget Header & Reorder Controls */}
+                                            <View style={styles.widgetHeader}>
+                                                <View style={styles.widgetInfo}>
+                                                    <View style={styles.widgetMetaRow}>
+                                                        <Text style={styles.dragIndicator}>⋮⋮ </Text>
+                                                        <Text style={styles.widgetMetaText}>{widget.id} ({widget.sourceId})</Text>
+                                                    </View>
+                                                    <TextInput 
+                                                        style={styles.widgetTitleInput} 
+                                                        value={widget.title}
+                                                        onChangeText={(text) => {
+                                                            const updated = [...reportWidgets];
+                                                            updated[index].title = text;
+                                                            setReportWidgets(updated);
+                                                        }}
+                                                    />
+                                                </View>
+                                                
+                                                <View style={styles.reorderControls}>
+                                                    <TouchableOpacity 
+                                                        style={[styles.reorderBtn, index === 0 && styles.disabledReorderBtn]}
+                                                        onPress={() => moveWidget(index, 'up')}
+                                                        disabled={index === 0}
+                                                    >
+                                                        <Text style={styles.reorderBtnText}>▲</Text>
                                                     </TouchableOpacity>
                                                     <TouchableOpacity 
-                                                        style={[styles.actionBtn, styles.actionBtnChart]}
-                                                        onPress={() => addWidget(source, 'chart')}
+                                                        style={[styles.reorderBtn, index === reportWidgets.length - 1 && styles.disabledReorderBtn]}
+                                                        onPress={() => moveWidget(index, 'down')}
+                                                        disabled={index === reportWidgets.length - 1}
                                                     >
-                                                        <Text style={styles.actionBtnText}>+ Bar Chart</Text>
+                                                        <Text style={styles.reorderBtnText}>▼</Text>
                                                     </TouchableOpacity>
-                                                </>
-                                            )}
-                                            {source.type === 'image' && (
-                                                <TouchableOpacity 
-                                                    style={styles.actionBtn}
-                                                    onPress={() => addWidget(source, 'text')}
-                                                >
-                                                    <Text style={styles.actionBtnText}>+ Image Block</Text>
-                                                </TouchableOpacity>
-                                            )}
-                                        </View>
+                                                    <TouchableOpacity 
+                                                        style={[styles.reorderBtn, styles.deleteBtn]}
+                                                        onPress={() => removeWidget(widget.id)}
+                                                    >
+                                                        <Text style={styles.deleteBtnText}>✕</Text>
+                                                    </TouchableOpacity>
+                                                </View>
+                                            </View>
+
+                                            {/* Widget Render Content */}
+                                            <View style={styles.widgetBody}>
+                                                {widget.type === 'text' && (
+                                                    <View style={styles.widgetTextContainer}>
+                                                        <Text style={styles.widgetTextBody}>
+                                                            {widget.data.text || widget.data.meta || 'Text Content'}
+                                                        </Text>
+                                                    </View>
+                                                )}
+
+                                                {widget.type === 'table' && (
+                                                    <View style={styles.widgetTableContainer}>
+                                                        <View style={styles.fullTable}>
+                                                            <View style={styles.tableHeaderRow}>
+                                                                {widget.data.headers?.map((h: string, idx: number) => (
+                                                                    <Text key={idx} style={styles.tableHeaderCell}>{h}</Text>
+                                                                ))}
+                                                            </View>
+                                                            {widget.data.rows?.map((row: string[], rIdx: number) => (
+                                                                <View key={rIdx} style={styles.tableRow}>
+                                                                    {row.map((cell, cIdx) => (
+                                                                        <Text key={cIdx} style={styles.tableCell}>{cell}</Text>
+                                                                    ))}
+                                                                </View>
+                                                            ))}
+                                                        </View>
+                                                    </View>
+                                                )}
+
+                                                {widget.type === 'chart' && (
+                                                    <View style={styles.widgetChartContainer}>
+                                                        <Text style={styles.chartTitle}>Variance Projection Visualizer</Text>
+                                                        <View style={styles.barChartContainer}>
+                                                            {widget.data.rows?.map((row: string[], idx: number) => {
+                                                                const val = parseFloat(row[2]?.replace(/[^0-9.]/g, '') || '0') || 0;
+                                                                const heightPercent = Math.min((val / 100) * 100, 100);
+                                                                return (
+                                                                    <View key={idx} style={styles.barGroup}>
+                                                                        <View style={styles.barTrack}>
+                                                                            <View style={[styles.barFill, { height: `${heightPercent || 20}%` }]} />
+                                                                        </View>
+                                                                        <Text style={styles.barLabel}>{row[0]}</Text>
+                                                                        <Text style={styles.barValText}>{row[2] || row[1]}</Text>
+                                                                    </View>
+                                                                );
+                                                            })}
+                                                        </View>
+                                                    </View>
+                                                )}
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })
+                            )}
+
+                            {/* Report Export Settings Panel */}
+                            {reportWidgets.length > 0 && (
+                                <View style={styles.exportPanel}>
+                                    <Text style={styles.exportPanelTitle}>Compile & Export Report</Text>
+                                    <Text style={styles.exportPanelDesc}>
+                                        Generates highly structured files locally. Launches interactive draft verification before saving.
+                                    </Text>
+                                    <View style={styles.exportButtonGroup}>
+                                        <TouchableOpacity 
+                                            style={[styles.exportBtn, styles.pdfBtn]}
+                                            onPress={() => handleTriggerExport('pdf')}
+                                        >
+                                            <Text style={styles.exportBtnText}>📄 PDF Document</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            style={[styles.exportBtn, styles.excelBtn]}
+                                            onPress={() => handleTriggerExport('excel')}
+                                        >
+                                            <Text style={styles.exportBtnText}>📊 Excel Sheets</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity 
+                                            style={[styles.exportBtn, styles.pptxBtn]}
+                                            onPress={() => handleTriggerExport('pptx')}
+                                        >
+                                            <Text style={styles.exportBtnText}>💻 PowerPoint Slides</Text>
+                                        </TouchableOpacity>
                                     </View>
                                 </View>
-                            );
-                        })}
+                            )}
+                        </View>
+                    )}
+                </ScrollView>
+            )}
+
+            {/* Floating Selection Bar for Multi-select */}
+            {selectedSourceIds.size > 0 && activeTab === 'sources' && (
+                <View style={styles.floatingActionBar}>
+                    <View style={styles.floatingInfo}>
+                        <Text style={styles.floatingCountText}>{selectedSourceIds.size} selected</Text>
                     </View>
-                ) : (
-                    // Section 2: Report Sandbox Builder (Drag/Drop Mocking & Reordering)
-                    <View style={styles.section}>
-                        <Text style={styles.sectionTitle}>Sandbox Document Layout</Text>
-                        <Text style={styles.sectionDesc}>
-                            Arrange widgets and configure presentation formatting:
-                        </Text>
+                    <View style={styles.floatingActions}>
+                        <TouchableOpacity style={styles.floatingActionBtn} onPress={() => handleBulkAdd('text')}>
+                            <Text style={styles.floatingActionBtnText}>+ Text</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.floatingActionBtn} onPress={() => handleBulkAdd('table')}>
+                            <Text style={styles.floatingActionBtnText}>+ Table</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={[styles.floatingActionBtn, { backgroundColor: '#565e74' }]} 
+                            onPress={() => handleBulkAdd('chart')}
+                        >
+                            <Text style={styles.floatingActionBtnText}>+ Chart</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            )}
 
-                        {reportWidgets.length === 0 ? (
-                            <View style={styles.emptySandbox}>
-                                <Text style={styles.emptySandboxIcon}>✏️</Text>
-                                <Text style={styles.emptySandboxTitle}>No widgets added</Text>
-                                <Text style={styles.emptySandboxDesc}>
-                                    Go to the "Detected Sources" tab to add text blocks, graphs, and spreadsheet tables.
-                                </Text>
-                            </View>
-                        ) : (
-                            reportWidgets.map((widget, index) => (
-                                <View key={widget.id} style={styles.widgetCard}>
-                                    {/* Widget Header & Reorder Controls */}
-                                    <View style={styles.widgetHeader}>
-                                        <View style={styles.widgetInfo}>
-                                            <Text style={styles.widgetMetaText}>{widget.id} ({widget.sourceId})</Text>
-                                            <TextInput 
-                                                style={styles.widgetTitleInput} 
-                                                value={widget.title}
-                                                onChangeText={(text) => {
-                                                    const updated = [...reportWidgets];
-                                                    updated[index].title = text;
-                                                    setReportWidgets(updated);
-                                                }}
-                                            />
-                                        </View>
-                                        
-                                        <View style={styles.reorderControls}>
-                                            <TouchableOpacity 
-                                                style={[styles.reorderBtn, index === 0 && styles.disabledReorderBtn]}
-                                                onPress={() => moveWidget(index, 'up')}
-                                                disabled={index === 0}
-                                            >
-                                                <Text style={styles.reorderBtnText}>▲</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity 
-                                                style={[styles.reorderBtn, index === reportWidgets.length - 1 && styles.disabledReorderBtn]}
-                                                onPress={() => moveWidget(index, 'down')}
-                                                disabled={index === reportWidgets.length - 1}
-                                            >
-                                                <Text style={styles.reorderBtnText}>▼</Text>
-                                            </TouchableOpacity>
-                                            <TouchableOpacity 
-                                                style={[styles.reorderBtn, styles.deleteBtn]}
-                                                onPress={() => removeWidget(widget.id)}
-                                            >
-                                                <Text style={styles.deleteBtnText}>✕</Text>
-                                            </TouchableOpacity>
-                                        </View>
-                                    </View>
+            {/* Draft Review Modal (Issue 8) */}
+            <Modal transparent visible={draftFormat !== null} animationType="slide">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.draftPreviewContainer}>
+                        <View style={styles.draftHeader}>
+                            <Text style={styles.draftHeaderTitle}>
+                                {draftFormat?.toUpperCase()} Draft Preview
+                            </Text>
+                            <Text style={styles.draftHeaderSubtitle}>
+                                Local verification check before finalizing artifact
+                            </Text>
+                        </View>
 
-                                    {/* Widget Render Content */}
-                                    <View style={styles.widgetBody}>
-                                        {widget.type === 'text' && (
-                                            <View style={styles.widgetTextContainer}>
-                                                <Text style={styles.widgetTextBody}>
-                                                    {widget.data.text || widget.data.meta}
-                                                </Text>
-                                            </View>
-                                        )}
+                        {/* Page Preview Content */}
+                        <ScrollView style={styles.draftPreviewScroll} contentContainerStyle={styles.draftPreviewScrollContent}>
+                            {draftFormat === 'pdf' && (
+                                <View style={styles.pdfPageContainer}>
+                                    <Text style={styles.pdfPageHeader}>DOCUMENT DRAFT REPORT</Text>
+                                    <Text style={styles.pdfPageSub}>Generated Offline • {new Date().toLocaleDateString()}</Text>
+                                    <View style={styles.pdfDivider} />
 
-                                        {widget.type === 'table' && (
-                                            <View style={styles.widgetTableContainer}>
-                                                <View style={styles.fullTable}>
-                                                    <View style={styles.tableHeaderRow}>
-                                                        {widget.data.headers?.map((h: string, idx: number) => (
-                                                            <Text key={idx} style={styles.tableHeaderCell}>{h}</Text>
+                                    {reportWidgets.map((widget, idx) => (
+                                        <View key={widget.id} style={styles.pdfWidgetSection}>
+                                            <Text style={styles.pdfWidgetTitle}>{idx + 1}. {widget.title}</Text>
+                                            {widget.type === 'text' && (
+                                                <Text style={styles.pdfWidgetText}>{widget.data.text || widget.data.meta}</Text>
+                                            )}
+                                            {widget.type === 'table' && (
+                                                <View style={styles.pdfTableGrid}>
+                                                    <View style={styles.pdfTableRowHeader}>
+                                                        {widget.data.headers?.map((h: string, i: number) => (
+                                                            <Text key={i} style={styles.pdfTableCellHeader}>{h}</Text>
                                                         ))}
                                                     </View>
-                                                    {widget.data.rows?.map((row: string[], rIdx: number) => (
-                                                        <View key={rIdx} style={styles.tableRow}>
-                                                            {row.map((cell, cIdx) => (
-                                                                <Text key={cIdx} style={styles.tableCell}>{cell}</Text>
+                                                    {widget.data.rows?.map((row: string[], ri: number) => (
+                                                        <View key={ri} style={styles.pdfTableRow}>
+                                                            {row.map((cell, ci) => (
+                                                                <Text key={ci} style={styles.pdfTableCell}>{cell}</Text>
                                                             ))}
                                                         </View>
                                                     ))}
                                                 </View>
-                                            </View>
-                                        )}
-
-                                        {widget.type === 'chart' && (
-                                            <View style={styles.widgetChartContainer}>
-                                                <Text style={styles.chartTitle}>Variance Projection Visualizer</Text>
-                                                <View style={styles.barChartContainer}>
-                                                    {widget.data.rows?.map((row: string[], idx: number) => {
-                                                        // Parse value for bar height percentage
-                                                        const val = parseFloat(row[2].replace(/[^0-9.]/g, ''));
-                                                        const heightPercent = Math.min((val / 200) * 100, 100);
-                                                        return (
-                                                            <View key={idx} style={styles.barGroup}>
-                                                                <View style={styles.barTrack}>
-                                                                    <View style={[styles.barFill, { height: `${heightPercent}%` }]} />
-                                                                </View>
-                                                                <Text style={styles.barLabel}>{row[0]}</Text>
-                                                                <Text style={styles.barValText}>${row[2]}k</Text>
-                                                            </View>
-                                                        );
-                                                    })}
+                                            )}
+                                            {widget.type === 'chart' && (
+                                                <View style={styles.pdfChartWrap}>
+                                                    <Text style={styles.pdfChartHeader}>[Bar Chart: {widget.title}]</Text>
+                                                    {widget.data.rows?.map((row: string[], ri: number) => (
+                                                        <Text key={ri} style={styles.pdfChartRow}>
+                                                            • {row[0]}: {row[2] || row[1]}
+                                                        </Text>
+                                                    ))}
                                                 </View>
-                                            </View>
-                                        )}
-                                    </View>
+                                            )}
+                                        </View>
+                                    ))}
                                 </View>
-                            ))
-                        )}
+                            )}
 
-                        {/* Report Export Settings Panel */}
-                        {reportWidgets.length > 0 && (
-                            <View style={styles.exportPanel}>
-                                <Text style={styles.exportPanelTitle}>Export Configured Report</Text>
-                                <Text style={styles.exportPanelDesc}>
-                                    Select formatting framework to save to encrypted local database and generate artifact:
-                                </Text>
-                                <View style={styles.exportButtonGroup}>
-                                    <TouchableOpacity 
-                                        style={[styles.exportBtn, styles.pdfBtn]}
-                                        onPress={() => handleExport('pdf')}
-                                    >
-                                        <Text style={styles.exportBtnText}>📄 PDF Document</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity 
-                                        style={[styles.exportBtn, styles.excelBtn]}
-                                        onPress={() => handleExport('excel')}
-                                    >
-                                        <Text style={styles.exportBtnText}>📊 Excel Sheets</Text>
-                                    </TouchableOpacity>
-                                    <TouchableOpacity 
-                                        style={[styles.exportBtn, styles.pptxBtn]}
-                                        onPress={() => handleExport('pptx')}
-                                    >
-                                        <Text style={styles.exportBtnText}>💻 PowerPoint</Text>
-                                    </TouchableOpacity>
+                            {draftFormat === 'excel' && (
+                                <View style={styles.excelSheetContainer}>
+                                    {/* Excel Headers A B C D */}
+                                    <View style={styles.excelRowHeader}>
+                                        <View style={styles.excelIndexCell}><Text style={styles.excelIndexCellText}></Text></View>
+                                        {['A', 'B', 'C', 'D', 'E'].map((letter) => (
+                                            <View key={letter} style={styles.excelHeaderCell}>
+                                                <Text style={styles.excelHeaderCellText}>{letter}</Text>
+                                            </View>
+                                        ))}
+                                    </View>
+                                    
+                                    {/* Excel Mock Rows */}
+                                    {reportWidgets.map((widget, wIdx) => {
+                                        const headers = widget.data.headers || ['Title', 'Data'];
+                                        const rows = widget.data.rows || [[widget.title, widget.data.text || 'Text Content']];
+                                        
+                                        return (
+                                            <View key={widget.id}>
+                                                {/* Header in sheet */}
+                                                <View style={styles.excelRow}>
+                                                    <View style={styles.excelIndexCell}><Text style={styles.excelIndexCellText}>1</Text></View>
+                                                    <View style={[styles.excelCell, { backgroundColor: '#e2e8f0' }]}><Text style={[styles.excelCellText, { fontWeight: 'bold' }]}>{widget.title}</Text></View>
+                                                    <View style={styles.excelCell} />
+                                                    <View style={styles.excelCell} />
+                                                    <View style={styles.excelCell} />
+                                                    <View style={styles.excelCell} />
+                                                </View>
+                                                
+                                                {/* Table column headers */}
+                                                <View style={styles.excelRow}>
+                                                    <View style={styles.excelIndexCell}><Text style={styles.excelIndexCellText}>2</Text></View>
+                                                    {headers.slice(0, 5).map((h: string, idx: number) => (
+                                                        <View key={idx} style={[styles.excelCell, { backgroundColor: '#f1f5f9' }]}>
+                                                            <Text style={[styles.excelCellText, { fontWeight: 'bold' }]}>{h}</Text>
+                                                        </View>
+                                                    ))}
+                                                </View>
+
+                                                {/* Data Rows */}
+                                                {rows.slice(0, 4).map((row: string[], ri: number) => (
+                                                    <View key={ri} style={styles.excelRow}>
+                                                        <View style={styles.excelIndexCell}><Text style={styles.excelIndexCellText}>{ri + 3}</Text></View>
+                                                        {row.slice(0, 5).map((cell, ci) => (
+                                                            <View key={ci} style={styles.excelCell}>
+                                                                <Text style={styles.excelCellText} numberOfLines={1}>{cell}</Text>
+                                                            </View>
+                                                        ))}
+                                                    </View>
+                                                ))}
+                                                <View style={{ height: 16 }} />
+                                            </View>
+                                        );
+                                    })}
                                 </View>
-                            </View>
-                        )}
+                            )}
+
+                            {draftFormat === 'pptx' && (
+                                <View style={styles.pptxSlidesContainer}>
+                                    {/* Slide 1: Title */}
+                                    <View style={styles.pptxSlideCard}>
+                                        <Text style={styles.pptxSlideNum}>Slide 1 (Title)</Text>
+                                        <View style={styles.pptxSlideBodyCentered}>
+                                            <Text style={styles.pptxSlideTitleText}>PROJECT PERFORMANCE DRAFT</Text>
+                                            <Text style={styles.pptxSlideSubText}>Generated via Local DataCapture Suite</Text>
+                                        </View>
+                                    </View>
+
+                                    {/* Slide 2+ for widgets */}
+                                    {reportWidgets.map((widget, idx) => (
+                                        <View key={widget.id} style={styles.pptxSlideCard}>
+                                            <Text style={styles.pptxSlideNum}>Slide {idx + 2} ({widget.title})</Text>
+                                            <View style={styles.pptxSlideBody}>
+                                                <Text style={styles.pptxSlideWidgetTitle}>{widget.title}</Text>
+                                                <Text style={styles.pptxSlideWidgetType}>Format: {widget.type.toUpperCase()}</Text>
+                                                
+                                                {widget.type === 'text' && (
+                                                    <Text style={styles.pptxSlideContentText} numberOfLines={4}>
+                                                        {widget.data.text || widget.data.meta}
+                                                    </Text>
+                                                )}
+                                                {widget.type === 'table' && (
+                                                    <Text style={styles.pptxSlideContentText}>
+                                                        Contains Spreadsheet Dataset ({widget.data.rows?.length || 0} rows)
+                                                    </Text>
+                                                )}
+                                                {widget.type === 'chart' && (
+                                                    <Text style={styles.pptxSlideContentText}>
+                                                        Contains Variance Projection Data Graph
+                                                    </Text>
+                                                )}
+                                            </View>
+                                        </View>
+                                    ))}
+                                </View>
+                            )}
+                        </ScrollView>
+
+                        {/* Actions */}
+                        <View style={styles.draftActionRow}>
+                            <TouchableOpacity 
+                                style={styles.draftEditBtn}
+                                onPress={() => setDraftFormat(null)}
+                            >
+                                <Text style={styles.draftEditBtnText}>Edit Draft</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={styles.draftGenerateBtn}
+                                onPress={handleConfirmExport}
+                            >
+                                <Text style={styles.draftGenerateBtnText}>Generate & Save</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-                )}
-            </ScrollView>
+                </View>
+            </Modal>
 
             {/* Exporting Loading Overlay */}
             <Modal transparent visible={isExporting} animationType="fade">
@@ -472,7 +791,7 @@ export default function ReviewScreen() {
                         <Text style={styles.successIcon}>✅</Text>
                         <Text style={styles.successTitle}>Report Generated Successfully</Text>
                         <Text style={styles.successDesc}>
-                            The assets were parsed, cataloged, and saved in SQLite database. A high fidelity copy was exported to local file storage.
+                            The assets were parsed, cataloged, and saved in the SQLite database. A high fidelity copy was exported to local file storage and shared.
                         </Text>
                         <View style={styles.pathBox}>
                             <Text style={styles.pathText} numberOfLines={2}>{exportedFile}</Text>
@@ -557,6 +876,47 @@ const styles = StyleSheet.create({
     scrollContainer: {
         padding: 16,
     },
+    centeredContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 32,
+    },
+    loadingDataText: {
+        marginTop: 12,
+        color: '#5c647a',
+        fontSize: 14,
+    },
+    emptyIcon: {
+        fontSize: 64,
+        marginBottom: 16,
+    },
+    emptyTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#191c1e',
+        marginBottom: 8,
+        textAlign: 'center',
+    },
+    emptyDesc: {
+        fontSize: 13,
+        color: '#5c647a',
+        textAlign: 'center',
+        lineHeight: 18,
+        marginBottom: 24,
+    },
+    emptyGoBackBtn: {
+        backgroundColor: '#004ac6',
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 8,
+    },
+    emptyGoBackBtnText: {
+        color: '#ffffff',
+        fontSize: 12,
+        fontWeight: 'bold',
+        letterSpacing: 1,
+    },
     section: {
         marginBottom: 24,
     },
@@ -585,11 +945,39 @@ const styles = StyleSheet.create({
         shadowOffset: { width: 0, height: 2 },
         elevation: 2,
     },
+    sourceCardSelected: {
+        borderColor: '#004ac6',
+        backgroundColor: '#f8faff',
+    },
     sourceHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
         marginBottom: 12,
+    },
+    leftHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    checkbox: {
+        width: 20,
+        height: 20,
+        borderRadius: 5,
+        borderWidth: 1.5,
+        borderColor: '#c3c6d7',
+        backgroundColor: '#ffffff',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    checkboxActive: {
+        borderColor: '#004ac6',
+        backgroundColor: '#004ac6',
+    },
+    checkboxCheck: {
+        color: '#ffffff',
+        fontSize: 11,
+        fontWeight: 'bold',
     },
     sourceIdContainer: {
         backgroundColor: '#eceef0',
@@ -760,6 +1148,16 @@ const styles = StyleSheet.create({
         marginBottom: 16,
         position: 'relative',
     },
+    widgetCardActiveDrag: {
+        borderColor: '#004ac6',
+        backgroundColor: '#f8faff',
+        transform: [{ scale: 1.02 }],
+        shadowColor: '#004ac6',
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 6,
+    },
     widgetHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -773,6 +1171,15 @@ const styles = StyleSheet.create({
         flex: 1,
         marginRight: 8,
     },
+    widgetMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    dragIndicator: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: '#c3c6d7',
+    },
     widgetMetaText: {
         fontSize: 10,
         color: '#737686',
@@ -784,6 +1191,7 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         color: '#191c1e',
         padding: 0,
+        marginTop: 2,
     },
     reorderControls: {
         flexDirection: 'row',
@@ -1039,5 +1447,319 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: 'bold',
         letterSpacing: 1,
+    },
+    // Multi-select floating bar styles
+    floatingActionBar: {
+        position: 'absolute',
+        bottom: 20,
+        left: 20,
+        right: 20,
+        backgroundColor: '#191c1e',
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: 16,
+        shadowColor: '#000000',
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 10,
+        zIndex: 999,
+    },
+    floatingInfo: {
+        flex: 1,
+    },
+    floatingCountText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 14,
+    },
+    floatingActions: {
+        flexDirection: 'row',
+        gap: 8,
+    },
+    floatingActionBtn: {
+        backgroundColor: '#004ac6',
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 8,
+    },
+    floatingActionBtnText: {
+        color: '#ffffff',
+        fontSize: 11,
+        fontWeight: 'bold',
+    },
+    // Draft Review Modal styles (Issue 8)
+    draftPreviewContainer: {
+        backgroundColor: '#ffffff',
+        borderRadius: 20,
+        width: '100%',
+        maxHeight: '85%',
+        padding: 20,
+        shadowColor: '#000000',
+        shadowOpacity: 0.25,
+        shadowRadius: 15,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: 8,
+    },
+    draftHeader: {
+        marginBottom: 16,
+        borderBottomWidth: 1,
+        borderBottomColor: '#eceef0',
+        paddingBottom: 12,
+    },
+    draftHeaderTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#191c1e',
+    },
+    draftHeaderSubtitle: {
+        fontSize: 12,
+        color: '#5c647a',
+        marginTop: 2,
+    },
+    draftPreviewScroll: {
+        marginVertical: 8,
+        backgroundColor: '#eceef0',
+        borderRadius: 12,
+        borderWidth: 1,
+        borderColor: '#c3c6d7',
+    },
+    draftPreviewScrollContent: {
+        padding: 16,
+    },
+    // PDF Draft styles
+    pdfPageContainer: {
+        backgroundColor: '#ffffff',
+        padding: 20,
+        shadowColor: '#000000',
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
+        minHeight: 400,
+    },
+    pdfPageHeader: {
+        fontSize: 15,
+        fontWeight: '800',
+        color: '#1e293b',
+        textAlign: 'center',
+    },
+    pdfPageSub: {
+        fontSize: 9,
+        color: '#64748b',
+        textAlign: 'center',
+        marginTop: 2,
+    },
+    pdfDivider: {
+        height: 1.5,
+        backgroundColor: '#1e293b',
+        marginVertical: 12,
+    },
+    pdfWidgetSection: {
+        marginBottom: 18,
+    },
+    pdfWidgetTitle: {
+        fontSize: 12,
+        fontWeight: 'bold',
+        color: '#0f172a',
+        marginBottom: 6,
+    },
+    pdfWidgetText: {
+        fontSize: 10,
+        color: '#334155',
+        lineHeight: 14,
+    },
+    pdfTableGrid: {
+        borderWidth: 0.7,
+        borderColor: '#475569',
+    },
+    pdfTableRowHeader: {
+        flexDirection: 'row',
+        backgroundColor: '#f1f5f9',
+        borderBottomWidth: 0.7,
+        borderBottomColor: '#475569',
+        padding: 4,
+    },
+    pdfTableCellHeader: {
+        flex: 1,
+        fontSize: 8,
+        fontWeight: 'bold',
+        color: '#0f172a',
+    },
+    pdfTableRow: {
+        flexDirection: 'row',
+        borderBottomWidth: 0.5,
+        borderBottomColor: '#cbd5e1',
+        padding: 4,
+    },
+    pdfTableCell: {
+        flex: 1,
+        fontSize: 8,
+        color: '#334155',
+    },
+    pdfChartWrap: {
+        backgroundColor: '#f8fafc',
+        padding: 8,
+        borderWidth: 0.5,
+        borderColor: '#94a3b8',
+    },
+    pdfChartHeader: {
+        fontSize: 9,
+        fontWeight: 'bold',
+        color: '#1e293b',
+        marginBottom: 4,
+    },
+    pdfChartRow: {
+        fontSize: 8,
+        color: '#475569',
+        marginVertical: 1,
+    },
+    // Excel Draft styles
+    excelSheetContainer: {
+        backgroundColor: '#ffffff',
+        borderWidth: 0.5,
+        borderColor: '#cbd5e1',
+    },
+    excelRowHeader: {
+        flexDirection: 'row',
+        backgroundColor: '#f1f5f9',
+        borderBottomWidth: 1,
+        borderBottomColor: '#cbd5e1',
+    },
+    excelHeaderCell: {
+        flex: 1,
+        paddingVertical: 4,
+        alignItems: 'center',
+        borderRightWidth: 0.5,
+        borderRightColor: '#cbd5e1',
+    },
+    excelHeaderCellText: {
+        fontSize: 9,
+        fontWeight: 'bold',
+        color: '#475569',
+    },
+    excelIndexCell: {
+        width: 25,
+        backgroundColor: '#f1f5f9',
+        justifyContent: 'center',
+        alignItems: 'center',
+        borderRightWidth: 1,
+        borderRightColor: '#cbd5e1',
+        borderBottomWidth: 0.5,
+        borderBottomColor: '#cbd5e1',
+    },
+    excelIndexCellText: {
+        fontSize: 8,
+        color: '#64748b',
+        fontWeight: '600',
+    },
+    excelRow: {
+        flexDirection: 'row',
+        borderBottomWidth: 0.5,
+        borderBottomColor: '#e2e8f0',
+    },
+    excelCell: {
+        flex: 1,
+        padding: 4,
+        borderRightWidth: 0.5,
+        borderRightColor: '#e2e8f0',
+        justifyContent: 'center',
+    },
+    excelCellText: {
+        fontSize: 8,
+        color: '#334155',
+    },
+    // PPTX Draft styles
+    pptxSlidesContainer: {
+        gap: 16,
+    },
+    pptxSlideCard: {
+        backgroundColor: '#ffffff',
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: '#cbd5e1',
+        aspectRatio: 1.77, // 16:9 widescreen slide!
+        padding: 16,
+        justifyContent: 'space-between',
+        shadowColor: '#000000',
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 1,
+    },
+    pptxSlideNum: {
+        fontSize: 8,
+        color: '#64748b',
+        fontWeight: 'bold',
+    },
+    pptxSlideBodyCentered: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pptxSlideTitleText: {
+        fontSize: 13,
+        fontWeight: 'bold',
+        color: '#1e293b',
+        textAlign: 'center',
+    },
+    pptxSlideSubText: {
+        fontSize: 8,
+        color: '#64748b',
+        marginTop: 4,
+    },
+    pptxSlideBody: {
+        flex: 1,
+        marginTop: 8,
+    },
+    pptxSlideWidgetTitle: {
+        fontSize: 11,
+        fontWeight: 'bold',
+        color: '#0f172a',
+    },
+    pptxSlideWidgetType: {
+        fontSize: 7,
+        color: '#64748b',
+        marginVertical: 2,
+    },
+    pptxSlideContentText: {
+        fontSize: 8,
+        color: '#334155',
+        lineHeight: 11,
+        marginTop: 4,
+    },
+    // Draft Actions styles
+    draftActionRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        marginTop: 16,
+        gap: 12,
+    },
+    draftEditBtn: {
+        flex: 1,
+        borderWidth: 1.5,
+        borderColor: '#004ac6',
+        borderRadius: 10,
+        paddingVertical: 14,
+        alignItems: 'center',
+    },
+    draftEditBtnText: {
+        color: '#004ac6',
+        fontWeight: 'bold',
+        fontSize: 13,
+    },
+    draftGenerateBtn: {
+        flex: 1.5,
+        backgroundColor: '#004ac6',
+        borderRadius: 10,
+        paddingVertical: 14,
+        alignItems: 'center',
+    },
+    draftGenerateBtnText: {
+        color: '#ffffff',
+        fontWeight: 'bold',
+        fontSize: 13,
     },
 });

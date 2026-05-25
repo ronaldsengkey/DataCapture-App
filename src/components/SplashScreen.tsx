@@ -136,6 +136,7 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
                     {/* Base Layer (Unfilled) */}
                     <View style={styles.baseLayer}>
                         <Image
+
                             source={{
                                 uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD1LHCP3SoUkvfqlpXEvndCRA7LE_jkzibk28sr6J4v7cAgzt_nJNnKbf8EncXCGd322pazL_9zx6VuAZ_mS3gImQWDk1oaawrXXc1b83vt4Q1105t4LcENP7wfFqSVQiLKgq9w0f6XaqeL4K90kdfUXNUNEbLy14rACIed8l-foR5anLnPR8O4r63swOmAyKcAGiNPqGvIhfIHSS9TznBciNU0wwMDe_OtvGbSxO3qnPpxDJKe3Nt8pPJrQkNo4sbf1tCDUunFm43f',
                             }}
@@ -275,7 +276,7 @@ const styles = StyleSheet.create({
     },
     waveContainer: {
         ...StyleSheet.absoluteFillObject,
-        zIndex: 2,
+        zIndex: 1,
     },
     footer: {
         width: '100%',

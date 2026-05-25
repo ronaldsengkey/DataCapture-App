@@ -12,6 +12,20 @@ import { Camera } from 'expo-camera';
 
 const { width, height } = Dimensions.get('window');
 
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Dimensions,
+  Animated,
+  Easing,
+  Image,
+} from 'react-native';
+import { Camera } from 'expo-camera';
+
+const { width, height } = Dimensions.get('window');
+
 export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Initializing secure local environment...');
@@ -41,13 +55,18 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
         });
       }, 30);
 
-      // Request camera permission upfront
-      setStatus('Requesting camera access...');
-      const { status: camStatus } = await Camera.requestCameraPermissionsAsync();
-      if (camStatus !== 'granted') {
-        setStatus('Camera permission denied – some features limited');
-      } else {
-        setStatus('Camera ready');
+      // Request camera permission upfront in try-catch
+      try {
+        setStatus('Requesting camera access...');
+        const { status: camStatus } = await Camera.requestCameraPermissionsAsync();
+        if (camStatus !== 'granted') {
+          setStatus('Camera permission denied – some features limited');
+        } else {
+          setStatus('Camera ready');
+        }
+      } catch (err) {
+        console.warn('Failed to request camera permission in splash:', err);
+        setStatus('Camera initialization skipped');
       }
 
       // Simulate other init tasks
@@ -57,7 +76,8 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
       await new Promise((resolve) => setTimeout(resolve, 500));
 
       clearInterval(interval);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      // Let the fill finish
+      await new Promise((resolve) => setTimeout(resolve, 1000));
       onFinish();
     };
     start();
@@ -68,13 +88,9 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
     outputRange: ['0%', '100%'],
   });
 
-  const clipProgress = progressAnim.interpolate({
-    inputRange: [0, 100],
-    outputRange: ['100%', '0%'],
-  });
-
   return (
     <View style={styles.container}>
+      {/* 1. Water Fill wave background */}
       <Animated.View
         style={[
           styles.waterFill,
@@ -82,6 +98,7 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
         ]}
       />
 
+      {/* 2. Base Dark/Color Content */}
       <View style={styles.content}>
         <Image
           source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD1LHCP3SoUkvfqlpXEvndCRA7LE_jkzibk28sr6J4v7cAgzt_nJNnKbf8EncXCGd322pazL_9zx6VuAZ_mS3gImQWDk1oaawrXXc1b83vt4Q1105t4LcENP7wfFqSVQiLKgq9w0f6XaqeL4K90kdfUXNUNEbLy14rACIed8l-foR5anLnPR8O4r63swOmAyKcAGiNPqGvIhfIHSS9TznBciNU0wwMDe_OtvGbSxO3qnPpxDJKe3Nt8pPJrQkNo4sbf1tCDUunFm43f' }}
@@ -91,21 +108,25 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
         <Text style={styles.subtitle}>Precision Utility Environment</Text>
       </View>
 
+      {/* 3. Clipped White Content (Revealed as container rises) */}
       <Animated.View
         style={[
-          styles.clippedContent,
-          { clipPath: `inset(${clipProgress} 0% 0% 0%)` } as any,
+          styles.clippedContainer,
+          { height: fillHeight, bottom: 0, position: 'absolute' },
         ]}
         pointerEvents="none"
       >
-        <Image
-          source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD1LHCP3SoUkvfqlpXEvndCRA7LE_jkzibk28sr6J4v7cAgzt_nJNnKbf8EncXCGd322pazL_9zx6VuAZ_mS3gImQWDk1oaawrXXc1b83vt4Q1105t4LcENP7wfFqSVQiLKgq9w0f6XaqeL4K90kdfUXNUNEbLy14rACIed8l-foR5anLnPR8O4r63swOmAyKcAGiNPqGvIhfIHSS9TznBciNU0wwMDe_OtvGbSxO3qnPpxDJKe3Nt8pPJrQkNo4sbf1tCDUunFm43f' }}
-          style={[styles.logo, { tintColor: 'white' }]}
-        />
-        <Text style={[styles.title, { color: 'white' }]}>DataCapture</Text>
-        <Text style={[styles.subtitle, { color: 'white' }]}>Precision Utility Environment</Text>
+        <View style={styles.clippedContentInner}>
+          <Image
+            source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD1LHCP3SoUkvfqlpXEvndCRA7LE_jkzibk28sr6J4v7cAgzt_nJNnKbf8EncXCGd322pazL_9zx6VuAZ_mS3gImQWDk1oaawrXXc1b83vt4Q1105t4LcENP7wfFqSVQiLKgq9w0f6XaqeL4K90kdfUXNUNEbLy14rACIed8l-foR5anLnPR8O4r63swOmAyKcAGiNPqGvIhfIHSS9TznBciNU0wwMDe_OtvGbSxO3qnPpxDJKe3Nt8pPJrQkNo4sbf1tCDUunFm43f' }}
+            style={[styles.logo, { tintColor: 'white' }]}
+          />
+          <Text style={[styles.title, { color: 'white' }]}>DataCapture</Text>
+          <Text style={[styles.subtitle, { color: 'white' }]}>Precision Utility Environment</Text>
+        </View>
       </Animated.View>
 
+      {/* 4. Footer Progress Controls */}
       <View style={styles.footer}>
         <View style={styles.progressBar}>
           <Animated.View
@@ -137,22 +158,36 @@ const styles = StyleSheet.create({
     backgroundColor: '#004ac6',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    zIndex: 1,
   },
-  content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
-  clippedContent: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+  content: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 2,
+  },
+  clippedContainer: {
+    left: 0,
+    right: 0,
+    overflow: 'hidden',
     backgroundColor: 'transparent',
+    zIndex: 3,
+  },
+  clippedContentInner: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: height,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
   },
   logo: { width: 120, height: 120, marginBottom: 16 },
   title: { fontSize: 30, fontWeight: '600', letterSpacing: -0.5, color: '#191C1E', marginBottom: 4 },
   subtitle: { fontSize: 12, fontWeight: '500', letterSpacing: 1, textTransform: 'uppercase', color: '#434655' },
-  footer: { position: 'absolute', bottom: 40, left: 20, right: 20 },
+  footer: { position: 'absolute', bottom: 40, left: 20, right: 20, zIndex: 4 },
   progressBar: { height: 4, backgroundColor: '#E0E3E5', borderRadius: 2, overflow: 'hidden', marginBottom: 12 },
   progressFill: { height: '100%', backgroundColor: '#004ac6', borderRadius: 2 },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
