@@ -36,7 +36,8 @@
     "plugins": [
       "expo-router",
       "expo-camera",
-      "expo-document-picker"
+      "expo-document-picker",
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

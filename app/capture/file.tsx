@@ -76,7 +76,7 @@ export default function FileUpload() {
       }
       setLoading(false);
       Alert.alert('Success', `${savedItems.length} file(s) captured`, [
-        { text: 'View Review', onPress: () => router.push('/review/') },
+{ text: 'View Review', onPress: () => router.push('/review') },
       ]);
     } catch (error) {
       console.error(error);

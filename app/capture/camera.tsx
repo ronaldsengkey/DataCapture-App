@@ -75,7 +75,7 @@ export default function CameraCapture() {
 
       setIsAnalyzing(false);
       Alert.alert('Success', `Captured ${extractedItems.length} item(s)`, [
-        { text: 'View Review', onPress: () => router.push('/review/') },
+{ text: 'View Review', onPress: () => router.push('/review') },
       ]);
     } catch (error) {
       console.error(error);

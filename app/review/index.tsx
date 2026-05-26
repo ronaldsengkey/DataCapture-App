@@ -1,301 +1,3 @@
-//==> Start from deep
-// app/review/index.tsx
-import React, { useState, useEffect } from 'react';
-import {
-  View, Text, FlatList, TouchableOpacity, Alert, ActivityIndicator,
-  StyleSheet, Modal, ScrollView, Dimensions
-} from 'react-native';
-import { PanGestureHandler, State, PanGestureHandlerGestureEvent } from 'react-native-gesture-handler';
-import { router } from 'expo-router';
-import { DatabaseService } from '../../src/services/DatabaseService';
-import { ExportService } from '../../src/services/ExportService';
-import { DataCaptureItem, ReportWidget } from '../../src/types';
-import { VictoryBar, VictoryChart, VictoryTheme, VictoryAxis } from 'victory-native';
-
-const { width } = Dimensions.get('window');
-
-export default function ReviewScreen() {
-  const [sources, setSources] = useState<DataCaptureItem[]>([]);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [widgets, setWidgets] = useState<ReportWidget[]>([]);
-  const [draggedItem, setDraggedItem] = useState<DataCaptureItem | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [showDraftModal, setShowDraftModal] = useState(false);
-  const [generating, setGenerating] = useState(false);
-
-  useEffect(() => {
-    loadSources();
-  }, []);
-
-  const loadSources = async () => {
-    try {
-      const db = DatabaseService.getInstance();
-      const items = await db.fetchActiveItems();
-      setSources(items);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to load captured data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const toggleSelect = (id: string) => {
-    const newSet = new Set(selectedIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
-    setSelectedIds(newSet);
-  };
-
-  const selectAll = () => {
-    setSelectedIds(new Set(sources.map(s => s.id)));
-  };
-  const clearSelection = () => setSelectedIds(new Set());
-
-  const onDragStart = (item: DataCaptureItem) => {
-    setDraggedItem(item);
-  };
-
-  const onDrop = (targetType: 'table' | 'chart') => {
-    if (!draggedItem) return;
-    if (targetType === 'chart' && draggedItem.type !== 'table') {
-      Alert.alert('Invalid', 'Only table data can be visualized as chart');
-      return;
-    }
-    let parsedContent;
-    try { parsedContent = JSON.parse(draggedItem.content); } catch(e) { parsedContent = {}; }
-    const newWidget: ReportWidget = {
-      id: `WIDGET-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
-      sourceId: draggedItem.id,
-      type: targetType,
-      title: parsedContent.title || `Data from ${draggedItem.type}`,
-      data: parsedContent,
-    };
-    setWidgets(prev => [...prev, newWidget]);
-    setDraggedItem(null);
-  };
-
-  const renderSourceCard = ({ item }: { item: DataCaptureItem }) => {
-    let preview = '';
-    try {
-      const parsed = JSON.parse(item.content);
-      preview = parsed.title || parsed.text?.substring(0, 80) || 'No preview';
-    } catch { preview = item.content.substring(0, 80); }
-    return (
-      <TouchableOpacity
-        style={[styles.sourceCard, selectedIds.has(item.id) && styles.selectedCard]}
-        onPress={() => toggleSelect(item.id)}
-        onLongPress={() => onDragStart(item)}
-        delayLongPress={200}
-      >
-        <Text style={styles.sourceType}>{item.type.toUpperCase()}</Text>
-        <Text style={styles.sourcePreview}>{preview}</Text>
-        <Text style={styles.sourceDate}>{new Date(item.createdAt).toLocaleString()}</Text>
-      </TouchableOpacity>
-    );
-  };
-
-  const renderWidget = ({ item }: { item: ReportWidget }) => {
-    if (item.type === 'table') {
-      const data = item.data;
-      if (!data.headers || !data.rows) return <Text>Invalid table data</Text>;
-      return (
-        <View style={styles.widgetContainer}>
-          <Text style={styles.widgetTitle}>{item.title}</Text>
-          <ScrollView horizontal>
-            <View>
-              <View style={styles.tableHeaderRow}>
-                {data.headers.map((h: string, idx: number) => (
-                  <Text key={idx} style={styles.tableHeaderCell}>{h}</Text>
-                ))}
-              </View>
-              {data.rows.map((row: string[], rowIdx: number) => (
-                <View key={rowIdx} style={styles.tableRow}>
-                  {row.map((cell: string, cellIdx: number) => (
-                    <Text key={cellIdx} style={styles.tableCell}>{cell}</Text>
-                  ))}
-                </View>
-              ))}
-            </View>
-          </ScrollView>
-        </View>
-      );
-    } else if (item.type === 'chart') {
-      const data = item.data;
-      if (!data.rows || data.rows.length === 0) return <Text>No chart data</Text>;
-      const chartData = data.rows.map((row: any, idx: number) => ({
-        x: row[0] || `Item ${idx+1}`,
-        y: parseFloat(row[1]) || 0,
-      }));
-      return (
-        <View style={styles.widgetContainer}>
-          <Text style={styles.widgetTitle}>{item.title}</Text>
-          <VictoryChart width={width - 40} theme={VictoryTheme.material}>
-            <VictoryAxis label="Category" />
-            <VictoryAxis dependentAxis label="Value" />
-            <VictoryBar data={chartData} x="x" y="y" style={{ data: { fill: "#004ac6" } }} />
-          </VictoryChart>
-        </View>
-      );
-    }
-    return null;
-  };
-
-  const handleDraftReview = () => {
-    if (widgets.length === 0) {
-      Alert.alert('No Widgets', 'Drag data from sources to the report area first.');
-      return;
-    }
-    setShowDraftModal(true);
-  };
-
-  const generateReport = async (format: 'pdf' | 'excel' | 'pptx') => {
-    setGenerating(true);
-    setShowDraftModal(false);
-    try {
-      const exportService = new ExportService();
-      const reportId = `report_${Date.now()}`;
-      const reportData = widgets.map(w => ({ type: w.type, title: w.title, data: w.data }));
-      const fileUri = await exportService.generateReport(reportId, reportData, format);
-      await exportService.shareReport(fileUri, format);
-      Alert.alert('Success', `Report generated as ${format.toUpperCase()}`);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to generate report');
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  if (loading) return <ActivityIndicator size="large" style={{ flex: 1 }} />;
-
-  return (
-    <View style={styles.container}>
-      <View style={styles.sourcesArea}>
-        <View style={styles.headerRow}>
-          <Text style={styles.sectionTitle}>📦 Captured Sources</Text>
-          <TouchableOpacity onPress={selectAll}><Text>Select All</Text></TouchableOpacity>
-          <TouchableOpacity onPress={clearSelection}><Text>Clear</Text></TouchableOpacity>
-        </View>
-        <FlatList
-          data={sources}
-          renderItem={renderSourceCard}
-          keyExtractor={item => item.id}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.sourceList}
-        />
-      </View>
-
-      <View style={styles.dropZones}>
-        <Text style={styles.sectionTitle}>⬇️ Drag & Drop to:</Text>
-        <View style={styles.dropZoneRow}>
-          <TouchableOpacity style={styles.dropZone} onPress={() => onDrop('table')}>
-            <Text>📊 Table</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.dropZone} onPress={() => onDrop('chart')}>
-            <Text>📈 Chart</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <View style={styles.reportArea}>
-        <Text style={styles.sectionTitle}>📄 Report Builder</Text>
-        <FlatList
-          data={widgets}
-          renderItem={renderWidget}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.widgetList}
-          ListEmptyComponent={<Text style={styles.emptyText}>Drag items here</Text>}
-        />
-      </View>
-
-      <TouchableOpacity style={styles.draftButton} onPress={handleDraftReview}>
-        <Text style={styles.draftButtonText}>Review Draft & Generate</Text>
-      </TouchableOpacity>
-
-      {/* Draft Modal */}
-      <Modal visible={showDraftModal} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Draft Review</Text>
-            <ScrollView style={styles.draftList}>
-              {widgets.map(w => (
-                <View key={w.id} style={styles.draftItem}>
-                  <Text style={styles.draftItemTitle}>{w.title}</Text>
-                  <Text style={styles.draftItemType}>{w.type}</Text>
-                </View>
-              ))}
-            </ScrollView>
-            <Text style={styles.formatLabel}>Select export format:</Text>
-            <View style={styles.formatRow}>
-              <TouchableOpacity style={styles.formatBtnPdf} onPress={() => generateReport('pdf')}>
-                <Text>PDF</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.formatBtnExcel} onPress={() => generateReport('excel')}>
-                <Text>Excel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.formatBtnPptx} onPress={() => generateReport('pptx')}>
-                <Text>PowerPoint</Text>
-              </TouchableOpacity>
-            </View>
-            <TouchableOpacity onPress={() => setShowDraftModal(false)} style={styles.closeModal}>
-              <Text>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      {generating && (
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator size="large" color="#004ac6" />
-          <Text>Generating report...</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { flex: 1, padding: 12, backgroundColor: '#f5f5f5' },
-  sourcesArea: { marginBottom: 20 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold' },
-  sourceList: { paddingRight: 16 },
-  sourceCard: { backgroundColor: 'white', padding: 12, marginRight: 10, borderRadius: 8, width: 160, elevation: 2 },
-  selectedCard: { backgroundColor: '#e0f0ff', borderWidth: 1, borderColor: '#004ac6' },
-  sourceType: { fontWeight: 'bold', marginBottom: 4 },
-  sourcePreview: { fontSize: 12, color: '#333' },
-  sourceDate: { fontSize: 10, color: '#888', marginTop: 6 },
-  dropZones: { marginBottom: 20 },
-  dropZoneRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: 8 },
-  dropZone: { backgroundColor: '#e0e0e0', paddingVertical: 12, paddingHorizontal: 20, borderRadius: 8, minWidth: 100, alignItems: 'center' },
-  reportArea: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 12, marginBottom: 12 },
-  widgetList: { paddingBottom: 20 },
-  widgetContainer: { marginBottom: 20, borderBottomWidth: 1, borderColor: '#eee', paddingBottom: 10 },
-  widgetTitle: { fontSize: 16, fontWeight: 'bold', marginBottom: 8 },
-  tableHeaderRow: { flexDirection: 'row', backgroundColor: '#f0f0f0' },
-  tableHeaderCell: { fontWeight: 'bold', padding: 8, borderWidth: 1, borderColor: '#ccc', minWidth: 100 },
-  tableRow: { flexDirection: 'row' },
-  tableCell: { padding: 8, borderWidth: 1, borderColor: '#ccc', minWidth: 100 },
-  draftButton: { backgroundColor: '#004ac6', padding: 14, borderRadius: 8, alignItems: 'center', marginBottom: 12 },
-  draftButtonText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
-  emptyText: { textAlign: 'center', color: '#aaa', marginTop: 30 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { backgroundColor: 'white', width: '90%', borderRadius: 12, padding: 20, maxHeight: '80%' },
-  modalTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 12 },
-  draftList: { maxHeight: 200, marginBottom: 12 },
-  draftItem: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 0.5 },
-  draftItemTitle: { fontSize: 14 },
-  draftItemType: { fontSize: 12, color: '#666' },
-  formatLabel: { fontSize: 16, marginVertical: 12 },
-  formatRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
-  formatBtnPdf: { backgroundColor: '#ff6b6b', padding: 10, borderRadius: 8, width: '30%', alignItems: 'center' },
-  formatBtnExcel: { backgroundColor: '#51cf66', padding: 10, borderRadius: 8, width: '30%', alignItems: 'center' },
-  formatBtnPptx: { backgroundColor: '#ffa94d', padding: 10, borderRadius: 8, width: '30%', alignItems: 'center' },
-  closeModal: { alignSelf: 'center', marginTop: 8 },
-  loadingOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
-});
-// End from deep
-/*
 import React, { useState, useEffect } from 'react';
 import { 
     View, 
@@ -312,8 +14,9 @@ import {
 } from 'react-native';
 import { useRouter, useNavigation } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { DatabaseService, DataCaptureItem } from '../../src/services/DatabaseService';
-import { ExportService, ReportWidget } from '../../src/services/ExportService';
+import { DatabaseService } from '../../src/services/DatabaseService';
+import { ExportService } from '../../src/services/ExportService';
+import { DataCaptureItem, ReportWidget } from '../../src/types';
 
 const { width } = Dimensions.get('window');
 
@@ -495,23 +198,18 @@ export default function ReviewScreen() {
         try {
             // Map sandbox widgets to service widgets
             const serviceWidgets: ReportWidget[] = reportWidgets.map(w => ({
+                id: w.id,
+                sourceId: w.sourceId,
                 type: w.type,
                 title: w.title,
                 data: w.data
             }));
 
-            let fileUri = '';
-            if (format === 'pdf') {
-                fileUri = await exportService.generatePDF(reportId, serviceWidgets);
-            } else if (format === 'excel') {
-                fileUri = await exportService.generateExcel(reportId, serviceWidgets);
-            } else {
-                fileUri = await exportService.generatePPTX(reportId, serviceWidgets);
-            }
+            const fileUri = await exportService.generateReport(reportId, serviceWidgets, format);
 
             // Share native file sheet (Issues 9, 10, 13)
             try {
-                await exportService.shareFile(fileUri);
+                await exportService.shareReport(fileUri, format);
             } catch (shareErr) {
                 console.log('Sharing failed or cancelled:', shareErr);
             }
@@ -655,7 +353,7 @@ export default function ReviewScreen() {
                                         </View>
 
                                         {/* Layout Actions */}
-                                        <View style={styles.actionRow} onStartShouldSetResponder={() => true} onSubmitEditing={(e) => e.stopPropagation()}>
+                                        <View style={styles.actionRow} onStartShouldSetResponder={() => true}>
                                             <Text style={styles.actionLabel}>Map to Report Widget:</Text>
                                             <View style={styles.actionButtons}>
                                                 {source.type === 'text' && (
@@ -2061,4 +1759,3 @@ const styles = StyleSheet.create({
         fontSize: 13,
     },
 });
-*/

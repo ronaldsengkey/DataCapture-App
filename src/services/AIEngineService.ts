@@ -18,7 +18,7 @@ export class AIEngineService {
     await this.init();
     const processed = await ImageManipulator.manipulateAsync(
       imageUri,
-      [{ resize: { width: 800 } }, { grayscale: 0.8 }],
+      [{ resize: { width: 800 } }],
       { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
     );
 

@@ -72,7 +72,7 @@ export default function URLCapture() {
       await db.saveCapturedItem(item);
       setLoading(false);
       Alert.alert('Success', 'Data extracted and saved', [
-        { text: 'View Review', onPress: () => router.push('/review/') },
+{ text: 'View Review', onPress: () => router.push('/review') },
       ]);
     } catch (error) {
       console.error(error);

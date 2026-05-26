@@ -56,12 +56,13 @@ export class DatabaseService {
     const result = stmt.executeSync([now]);
     const items: DataCaptureItem[] = [];
     for (const row of result) {
+      const r = row as any;
       items.push({
-        id: row.id,
-        type: row.type,
-        createdAt: row.createdAt,
-        expiresAt: row.expiresAt,
-        content: row.content,
+        id: r.id,
+        type: r.type,
+        createdAt: r.createdAt,
+        expiresAt: r.expiresAt,
+        content: r.content,
       });
     }
     stmt.finalizeSync();
