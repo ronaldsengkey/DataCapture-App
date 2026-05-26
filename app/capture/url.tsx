@@ -1,3 +1,114 @@
+//==> Start from deep
+// app/capture/url.tsx
+import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native';
+import { router } from 'expo-router';
+import { DatabaseService } from '../../src/services/DatabaseService';
+import { DataCaptureItem } from '../../src/types';
+
+export default function URLCapture() {
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleExtract = async () => {
+    if (!url.trim() || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+      Alert.alert('Invalid URL', 'Please enter a valid HTTP/HTTPS URL');
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await fetch(url);
+      const contentType = response.headers.get('content-type') || '';
+      const rawText = await response.text();
+      const db = DatabaseService.getInstance();
+      let item: DataCaptureItem;
+
+      if (contentType.includes('application/json') || url.endsWith('.json')) {
+        const data = JSON.parse(rawText);
+        if (Array.isArray(data) && data.length) {
+          const headers = Object.keys(data[0]);
+          const rows = data.map(obj => headers.map(h => String(obj[h] ?? '')));
+          item = {
+            id: `SRC-URL-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            type: 'table',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+            content: JSON.stringify({ title: 'JSON API Data', headers, rows, source_url: url }),
+          };
+        } else {
+          item = {
+            id: `SRC-URL-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+            type: 'text',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+            content: JSON.stringify({ title: 'JSON Response', text: JSON.stringify(data, null, 2), source_url: url }),
+          };
+        }
+      } 
+      else if (contentType.includes('text/csv') || url.endsWith('.csv')) {
+        const lines = rawText.split('\n').filter(l => l.trim());
+        const headers = lines[0].split(',').map(h => h.trim());
+        const rows = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()));
+        item = {
+          id: `SRC-URL-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          type: 'table',
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          content: JSON.stringify({ title: 'CSV from URL', headers, rows, source_url: url }),
+        };
+      }
+      else {
+        // HTML or plain text
+        const textOnly = rawText.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 5000);
+        item = {
+          id: `SRC-URL-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+          type: 'text',
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+          content: JSON.stringify({ title: 'Web Page Content', text: textOnly, source_url: url }),
+        };
+      }
+
+      await db.saveCapturedItem(item);
+      setLoading(false);
+      Alert.alert('Success', 'Data extracted and saved', [
+        { text: 'View Review', onPress: () => router.push('/review/') },
+      ]);
+    } catch (error) {
+      console.error(error);
+      setLoading(false);
+      Alert.alert('Error', 'Failed to fetch or parse URL');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.label}>Enter URL (HTTP/HTTPS)</Text>
+      <TextInput
+        style={styles.input}
+        value={url}
+        onChangeText={setUrl}
+        placeholder="https://example.com/data.csv"
+        autoCapitalize="none"
+      />
+      <TouchableOpacity style={styles.button} onPress={handleExtract} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? 'Extracting...' : 'Extract Data'}</Text>
+      </TouchableOpacity>
+      {loading && <ActivityIndicator size="large" color="#004ac6" style={{ marginTop: 20 }} />}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', padding: 20 },
+  label: { fontSize: 16, marginBottom: 8, fontWeight: 'bold' },
+  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 8, padding: 12, marginBottom: 20, fontSize: 16 },
+  button: { backgroundColor: '#004ac6', paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  buttonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+});
+//==> End from deep
+
+/*
 import React, { useState } from 'react';
 import {
     View,
@@ -160,8 +271,9 @@ export default function UrlCapture() {
                 style={{ flex: 1 }}
                 behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
             >
-                {/* Header */}
-                <View style={styles.header}>
+                {/* Header */
+                /*}
+               <View style={styles.header}>
                     <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                         <Text style={styles.backBtnText}>←</Text>
                     </TouchableOpacity>
@@ -172,7 +284,8 @@ export default function UrlCapture() {
                 </View>
 
                 <ScrollView contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
-                    {/* URL Input Section */}
+                    {/* URL Input Section 
+                    *//*}
                     <View style={styles.inputCard}>
                         <Text style={styles.inputLabel}>Data Source URL</Text>
                         <View style={styles.inputRow}>
@@ -192,7 +305,8 @@ export default function UrlCapture() {
                         <Text style={styles.inputHint}>Supports JSON APIs, CSV endpoints, and HTML tables.</Text>
                     </View>
 
-                    {/* Quick URL Examples */}
+                    {/* Quick URL Examples
+                    *//*}
                     <View style={styles.examplesCard}>
                         <Text style={styles.examplesLabel}>Quick examples:</Text>
                         {[
@@ -209,7 +323,8 @@ export default function UrlCapture() {
                         ))}
                     </View>
 
-                    {/* Extract Button */}
+                    {/* Extract Button 
+                    *//*}
                     <TouchableOpacity
                         style={[styles.extractBtn, isLoading && styles.extractBtnDisabled]}
                         onPress={handleExtract}
@@ -223,7 +338,8 @@ export default function UrlCapture() {
                         )}
                     </TouchableOpacity>
 
-                    {/* Loading State */}
+                    {/* Loading State
+                    *//*}
                     {isLoading && (
                         <View style={styles.loadingCard}>
                             <Text style={styles.loadingTitle}>Fetching & Parsing...</Text>
@@ -231,7 +347,8 @@ export default function UrlCapture() {
                         </View>
                     )}
 
-                    {/* Preview Result */}
+                    {/* Preview Result
+                    *//*}
                     {previewData && !isLoading && (
                         <View style={styles.previewCard}>
                             <View style={styles.previewHeader}>
@@ -340,4 +457,4 @@ const styles = StyleSheet.create({
         paddingVertical: 14, alignItems: 'center',
     },
     proceedBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 },
-});
+});*/

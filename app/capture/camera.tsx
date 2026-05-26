@@ -1,3 +1,130 @@
+//==> Start from deep
+
+// app/capture/camera.tsx
+import React, { useRef, useState } from 'react';
+import { View, Text, TouchableOpacity, Alert, ActivityIndicator, StyleSheet } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import { router } from 'expo-router';
+import { AIEngineService } from '../../src/services/AIEngineService';
+import { DatabaseService } from '../../src/services/DatabaseService';
+import { DataCaptureItem } from '../../src/types';
+
+export default function CameraCapture() {
+  const [permission, requestPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+  if (!permission) return <View />;
+  if (!permission.granted) {
+    return (
+      <View style={styles.container}>
+        <Text>Camera permission required</Text>
+        <TouchableOpacity onPress={requestPermission} style={styles.button}>
+          <Text>Grant Permission</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const parseTableFromText = (text: string) => {
+    const lines = text.split('\n').filter(l => l.trim().length > 0);
+    if (lines.length === 0) return { headers: [], rows: [] };
+    const headers = lines[0].split(/\s{2,}|\t/).map(h => h.trim());
+    const rows = lines.slice(1).map(line => line.split(/\s{2,}|\t/).map(cell => cell.trim()));
+    return { headers, rows };
+  };
+
+  const handleCapture = async () => {
+    if (!cameraRef.current) return;
+    setIsAnalyzing(true);
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
+      if (!photo) throw new Error('No photo taken');
+
+      const aiService = new AIEngineService();
+      const regions = await aiService.detectRegions(photo.uri);
+      const db = DatabaseService.getInstance();
+      const extractedItems: DataCaptureItem[] = [];
+
+      for (let i = 0; i < regions.length; i++) {
+        const region = regions[i];
+        let item: DataCaptureItem;
+        if (region.label === 'text_block') {
+          const text = await aiService.extractText(photo.uri, region.box);
+          item = {
+            id: `SRC-CAM-TXT-${Date.now()}-${i}`,
+            type: 'text',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+            content: JSON.stringify({ title: `Text Block ${i+1}`, text, source: 'camera' }),
+          };
+        } else {
+          const tableText = await aiService.extractText(photo.uri, region.box);
+          const { headers, rows } = parseTableFromText(tableText);
+          item = {
+            id: `SRC-CAM-TBL-${Date.now()}-${i}`,
+            type: 'table',
+            createdAt: Date.now(),
+            expiresAt: Date.now() + 7 * 24 * 60 * 60 * 1000,
+            content: JSON.stringify({ title: `Table ${i+1}`, headers, rows, source: 'camera' }),
+          };
+        }
+        await db.saveCapturedItem(item);
+        extractedItems.push(item);
+      }
+
+      setIsAnalyzing(false);
+      Alert.alert('Success', `Captured ${extractedItems.length} item(s)`, [
+        { text: 'View Review', onPress: () => router.push('/review/') },
+      ]);
+    } catch (error) {
+      console.error(error);
+      setIsAnalyzing(false);
+      Alert.alert('Capture Error', 'Failed to analyze image. Ensure good lighting.');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <CameraView style={styles.camera} ref={cameraRef} facing="back" />
+      {isAnalyzing && (
+        <View style={styles.overlay}>
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.overlayText}>Analyzing...</Text>
+        </View>
+      )}
+      <TouchableOpacity style={styles.captureButton} onPress={handleCapture} disabled={isAnalyzing}>
+        <Text style={styles.captureText}>Capture</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  camera: { flex: 1 },
+  captureButton: {
+    position: 'absolute',
+    bottom: 30,
+    alignSelf: 'center',
+    backgroundColor: '#004ac6',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 30,
+  },
+  captureText: { color: 'white', fontSize: 18, fontWeight: 'bold' },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  overlayText: { color: 'white', marginTop: 10, fontSize: 16 },
+  button: { backgroundColor: '#004ac6', padding: 10, borderRadius: 8, marginTop: 20 },
+});
+
+//==> End from deep
+/*
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Platform, Alert } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useState, useRef } from 'react';
@@ -112,7 +239,8 @@ export default function CameraCapture() {
         <View style={styles.cameraContainer}>
             <CameraView style={StyleSheet.absoluteFill} facing={facing} ref={cameraRef}>
                 <View style={styles.overlayContainer}>
-                    {/* Top Bar Controls */}
+                    {/* Top Bar Controls 
+                    *//*}
                     <View style={styles.topBar}>
                         <TouchableOpacity onPress={() => router.back()} style={styles.controlBtn}>
                             <Text style={styles.controlText}>✕</Text>
@@ -125,7 +253,8 @@ export default function CameraCapture() {
                         </TouchableOpacity>
                     </View>
 
-                    {/* Aiming/Framing Guide */}
+                    {/* Aiming/Framing Guide 
+                    *//*}
                     <View style={styles.frameGuideContainer}>
                         <View style={styles.guideCornerTopLeft} />
                         <View style={styles.guideCornerTopRight} />
@@ -134,9 +263,11 @@ export default function CameraCapture() {
                         <Text style={styles.guideHelperText}>Align document or table within frame</Text>
                     </View>
 
-                    {/* Bottom Controls Area */}
+                    {/* Bottom Controls Area 
+                    *//*}
                     <View style={styles.bottomControlsContainer}>
-                        {/* Capture Shutter Button */}
+                        {/* Capture Shutter Button 
+                        *//*}
                         <TouchableOpacity 
                             onPress={handleCapture}
                             style={styles.shutterButtonOuter}
@@ -149,7 +280,8 @@ export default function CameraCapture() {
                 </View>
             </CameraView>
 
-            {/* Simulated Analysis Overlay */}
+            {/* Simulated Analysis Overlay 
+            *//*}
             {isAnalyzing && (
                 <View style={styles.analysisOverlay}>
                     <ActivityIndicator size="large" color="#ffffff" />
@@ -362,3 +494,4 @@ const styles = StyleSheet.create({
         textAlign: 'center',
     },
 });
+*/

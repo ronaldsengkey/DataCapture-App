@@ -1,3 +1,129 @@
+//==>
+// components/AnimatedSplash.tsx
+import React, { useEffect, useRef } from 'react';
+import { View, Text, Image, Animated, StyleSheet, Dimensions } from 'react-native';
+
+const { height: screenHeight } = Dimensions.get('window');
+
+interface Props {
+  onFinish: () => void;
+}
+
+const AnimatedSplash: React.FC<Props> = ({ onFinish }) => {
+  const fillHeight = useRef(new Animated.Value(0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
+  const status = useRef('Initializing...');
+
+  useEffect(() => {
+    // Simulate loading progress
+    Animated.timing(progress, {
+      toValue: 100,
+      duration: 2000,
+      useNativeDriver: false,
+    }).start();
+
+    // Water fill animation (rises from bottom)
+    Animated.timing(fillHeight, {
+      toValue: screenHeight,
+      duration: 2000,
+      useNativeDriver: false,
+    }).start(() => onFinish());
+
+    // Update status text
+    const interval = setInterval(() => {
+      if (progress.__getValue() < 30) status.current = 'Loading engine...';
+      else if (progress.__getValue() < 70) status.current = 'Preparing UI...';
+      else status.current = 'Almost ready...';
+    }, 500);
+    return () => clearInterval(interval);
+  }, []);
+
+  const progressPercent = progress.interpolate({
+    inputRange: [0, 100],
+    outputRange: ['0%', '100%'],
+  });
+
+  return (
+    <View style={styles.container}>
+      {/* Content (Logo & Text) - above water */}
+      <View style={styles.content}>
+        <Image source={require('../assets/logo.png')} style={styles.logo} />
+        <Text style={styles.title}>DataCapture</Text>
+        <Text style={styles.subtitle}>Precision Utility Environment</Text>
+      </View>
+
+      {/* Water fill (animated) - behind content */}
+      <Animated.View
+        style={[
+          styles.waterFill,
+          { height: fillHeight },
+        ]}
+      />
+
+      {/* Footer with progress bar - always on top */}
+      <View style={styles.footer}>
+        <View style={styles.progressBar}>
+          <Animated.View style={[styles.progressFill, { width: progressPercent }]} />
+        </View>
+        <View style={styles.statusRow}>
+          <Text style={styles.statusText}>{status.current}</Text>
+          <Text style={styles.percent}>{Math.floor(progress.__getValue())}%</Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#ffffff' },
+  content: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    zIndex: 2,
+  },
+  logo: { width: 120, height: 120, marginBottom: 20, resizeMode: 'contain' },
+  title: { fontSize: 32, fontWeight: 'bold', color: '#004ac6', marginBottom: 10 },
+  subtitle: { fontSize: 16, color: '#666', textAlign: 'center' },
+  waterFill: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: '#004ac6',
+    zIndex: 1,
+  },
+  footer: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    right: 20,
+    zIndex: 3,
+  },
+  progressBar: {
+    height: 4,
+    backgroundColor: '#e0e0e0',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#004ac6',
+  },
+  statusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  statusText: { color: '#666', fontSize: 12 },
+  percent: { color: '#004ac6', fontSize: 12, fontWeight: 'bold' },
+});
+
+export default AnimatedSplash;
+//==>
+
+/*
 import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -90,7 +216,8 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
 
   return (
     <View style={styles.container}>
-      {/* 1. Water Fill wave background */}
+      {/* 1. Water Fill wave background 
+      *//*}
       <Animated.View
         style={[
           styles.waterFill,
@@ -98,7 +225,8 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
         ]}
       />
 
-      {/* 2. Base Dark/Color Content */}
+      {/* 2. Base Dark/Color Content
+      *//*}
       <View style={styles.content}>
         <Image
           source={{ uri: 'https://lh3.googleusercontent.com/aida-public/AB6AXuD1LHCP3SoUkvfqlpXEvndCRA7LE_jkzibk28sr6J4v7cAgzt_nJNnKbf8EncXCGd322pazL_9zx6VuAZ_mS3gImQWDk1oaawrXXc1b83vt4Q1105t4LcENP7wfFqSVQiLKgq9w0f6XaqeL4K90kdfUXNUNEbLy14rACIed8l-foR5anLnPR8O4r63swOmAyKcAGiNPqGvIhfIHSS9TznBciNU0wwMDe_OtvGbSxO3qnPpxDJKe3Nt8pPJrQkNo4sbf1tCDUunFm43f' }}
@@ -108,7 +236,8 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
         <Text style={styles.subtitle}>Precision Utility Environment</Text>
       </View>
 
-      {/* 3. Clipped White Content (Revealed as container rises) */}
+      {/* 3. Clipped White Content (Revealed as container rises)
+       *//*}
       <Animated.View
         style={[
           styles.clippedContainer,
@@ -126,7 +255,8 @@ export default function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
         </View>
       </Animated.View>
 
-      {/* 4. Footer Progress Controls */}
+      {/* 4. Footer Progress Controls 
+      *//*}
       <View style={styles.footer}>
         <View style={styles.progressBar}>
           <Animated.View
@@ -194,3 +324,4 @@ const styles = StyleSheet.create({
   statusText: { fontSize: 12, color: '#434655' },
   percent: { fontSize: 12, fontWeight: '600', color: '#004ac6' },
 });
+*/

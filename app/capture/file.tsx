@@ -1,3 +1,111 @@
+//==> Start from deep
+// app/capture/file.tsx
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, Alert, ActivityIndicator, StyleSheet, ScrollView } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { router } from 'expo-router';
+import { DatabaseService } from '../../src/services/DatabaseService';
+import { ParsedFileResult, DataCaptureItem } from '../../src/types';
+
+export default function FileUpload() {
+  const [loading, setLoading] = useState(false);
+
+  const parseFileContent = async (asset: DocumentPicker.DocumentPickerAsset): Promise<ParsedFileResult> => {
+    const fileName = asset.name;
+    const ext = fileName.split('.').pop()?.toLowerCase();
+    const fileSizeKb = asset.size ? asset.size / 1024 : 0;
+    const response = await fetch(asset.uri);
+    const text = await response.text();
+
+    if (ext === 'csv') {
+      const lines = text.split('\n').filter(l => l.trim());
+      const headers = lines[0].split(',').map(h => h.trim());
+      const rows = lines.slice(1).map(line => line.split(',').map(cell => cell.trim()));
+      return { name: fileName, format: 'csv', sizeKb: fileSizeKb, headers, rows, content: text };
+    } 
+    else if (ext === 'json') {
+      const data = JSON.parse(text);
+      let headers: string[] = [], rows: any[] = [];
+      if (Array.isArray(data) && data.length) {
+        headers = Object.keys(data[0]);
+        rows = data.map(obj => headers.map(h => obj[h]));
+      }
+      return { name: fileName, format: 'json', sizeKb: fileSizeKb, headers, rows, content: data };
+    }
+    else {
+      // plain text or pdf (simplified)
+      return { name: fileName, format: 'txt', sizeKb: fileSizeKb, content: text };
+    }
+  };
+
+  const saveToDatabase = async (parsed: ParsedFileResult): Promise<DataCaptureItem> => {
+    const db = DatabaseService.getInstance();
+    const isTable = parsed.headers && parsed.headers.length > 0;
+    const contentObj = isTable
+      ? { title: parsed.name, headers: parsed.headers, rows: parsed.rows, source: 'file' }
+      : { title: parsed.name, text: parsed.content?.substring(0, 2000), source: 'file' };
+    
+    const item: DataCaptureItem = {
+      id: `SRC-FILE-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      type: isTable ? 'table' : 'text',
+      createdAt: Date.now(),
+      expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
+      content: JSON.stringify(contentObj),
+    };
+    await db.saveCapturedItem(item);
+    return item;
+  };
+
+  const handleBrowse = async () => {
+    setLoading(true);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'application/json', 'text/plain', 'application/pdf'],
+        copyToCacheDirectory: true,
+        multiple: true,
+      });
+      if (result.canceled || !result.assets.length) {
+        setLoading(false);
+        return;
+      }
+      const savedItems: DataCaptureItem[] = [];
+      for (const asset of result.assets) {
+        const parsed = await parseFileContent(asset);
+        const saved = await saveToDatabase(parsed);
+        savedItems.push(saved);
+      }
+      setLoading(false);
+      Alert.alert('Success', `${savedItems.length} file(s) captured`, [
+        { text: 'View Review', onPress: () => router.push('/review/') },
+      ]);
+    } catch (error) {
+      console.error(error);
+      setLoading(false);
+      Alert.alert('Error', 'Failed to process files');
+    }
+  };
+
+  return (
+    <ScrollView contentContainerStyle={styles.container}>
+      <Text style={styles.title}>Upload File</Text>
+      <Text style={styles.subtitle}>Supports CSV, JSON, TXT, PDF</Text>
+      <TouchableOpacity style={styles.button} onPress={handleBrowse} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? 'Processing...' : 'Select Files'}</Text>
+      </TouchableOpacity>
+      {loading && <ActivityIndicator size="large" color="#004ac6" style={{ marginTop: 20 }} />}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 10 },
+  subtitle: { fontSize: 14, color: '#666', marginBottom: 30, textAlign: 'center' },
+  button: { backgroundColor: '#004ac6', paddingVertical: 12, paddingHorizontal: 30, borderRadius: 8 },
+  buttonText: { color: 'white', fontSize: 16, fontWeight: 'bold' },
+});
+//==> End from deep
+/*
 import React, { useState } from 'react';
 import {
     View,
@@ -190,7 +298,8 @@ export default function FileCapture() {
 
     return (
         <SafeAreaView style={styles.container}>
-            {/* Header */}
+            {/* Header 
+            *//*}
             <View style={styles.header}>
                 <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
                     <Text style={styles.backBtnText}>←</Text>
@@ -202,7 +311,8 @@ export default function FileCapture() {
             </View>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                {/* Drop Zone / Browse Area */}
+                {/* Drop Zone / Browse Area 
+                *//*}
                 <TouchableOpacity
                     style={[styles.dropZone, isPickerLoading && styles.dropZoneActive]}
                     onPress={handleBrowseFiles}
@@ -226,7 +336,8 @@ export default function FileCapture() {
                     )}
                 </TouchableOpacity>
 
-                {/* Supported Formats Info */}
+                {/* Supported Formats Info 
+                *//*}
                 {pickedFiles.length === 0 && !isPickerLoading && (
                     <View style={styles.formatsCard}>
                         <Text style={styles.formatsTitle}>Supported File Formats</Text>
@@ -243,7 +354,8 @@ export default function FileCapture() {
                     </View>
                 )}
 
-                {/* Parsed File Results */}
+                {/* Parsed File Results 
+                *//*}
                 {pickedFiles.length > 0 && (
                     <View style={styles.resultsSection}>
                         <Text style={styles.resultsTitle}>Select Files to Import</Text>
@@ -273,7 +385,8 @@ export default function FileCapture() {
                             );
                         })}
 
-                        {/* Proceed Button */}
+                        {/* Proceed Button 
+                        *//*}
                         <TouchableOpacity
                             style={[styles.proceedBtn, selectedIds.size === 0 && styles.proceedBtnDisabled]}
                             onPress={handleProceed}
@@ -366,3 +479,4 @@ const styles = StyleSheet.create({
     proceedBtnDisabled: { backgroundColor: '#c3c6d7' },
     proceedBtnText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13, letterSpacing: 1 },
 });
+*/
